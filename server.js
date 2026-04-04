@@ -1665,7 +1665,7 @@ app.post("/relatorio/:id/gerar", auth, (req, res) => {
   });
 });
 
-app.get("/relatorio/:id", auth, (req, res) => {
+app.get("/relatorio/:id", (req, res) => {
   db.get(
     `
     SELECT * FROM relatorios
