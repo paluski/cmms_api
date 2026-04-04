@@ -1410,6 +1410,49 @@ function desenharCaixa(doc, x, y, w, h, titulo, valor) {
   });
 }
 
+function formatarDataHoraBR(dataTexto) {
+  if (!dataTexto) return "-";
+  const d = new Date(dataTexto);
+  if (Number.isNaN(d.getTime())) return dataTexto;
+  return d.toLocaleString("pt-BR");
+}
+
+function formatarDataBR(dataTexto) {
+  if (!dataTexto) return "-";
+  const d = new Date(dataTexto);
+  if (Number.isNaN(d.getTime())) return dataTexto;
+  return d.toLocaleDateString("pt-BR");
+}
+
+function textoSeguro(valor) {
+  return normalizarTexto(valor || "-");
+}
+
+function prioridadeParaCriticidade(prioridade) {
+  const p = String(prioridade || "").toLowerCase();
+  if (p === "baixa") return "leve";
+  if (p === "media") return "moderada";
+  if (p === "alta" || p === "critica") return "grave";
+  return "";
+}
+
+function marcar(doc, x, y, marcado) {
+  doc.rect(x, y, 10, 10).stroke();
+  if (marcado) {
+    doc.font("Helvetica-Bold").fontSize(10).text("X", x + 1.8, y - 0.5);
+  }
+}
+
+function caixa(doc, x, y, w, h) {
+  doc.rect(x, y, w, h).stroke();
+}
+
+function textoCentro(doc, texto, x, y, w, size = 9, bold = false) {
+  doc.font(bold ? "Helvetica-Bold" : "Helvetica")
+    .fontSize(size)
+    .text(texto, x, y, { width: w, align: "center" });
+}
+
 function gerarRelatorio(id) {
   db.get(
     `
@@ -1417,13 +1460,18 @@ function gerarRelatorio(id) {
       ordens_servico.*,
       usinas.nome as usina,
       usinas.cidade as usina_cidade,
-      usuarios.nome as tecnico_nome,
+      usinas.cliente as usina_cliente,
+      tecnico.nome as tecnico_nome,
+      verificador.nome as verificador_nome,
+      aprovador.nome as aprovador_nome,
       tipos_falha.nome as tipo_falha_nome
     FROM ordens_servico
     LEFT JOIN usinas ON usinas.id = ordens_servico.usina_id
-    LEFT JOIN usuarios ON usuarios.id = ordens_servico.tecnico_id
+    LEFT JOIN usuarios as tecnico ON tecnico.id = ordens_servico.tecnico_id
+    LEFT JOIN usuarios as verificador ON verificador.id = ordens_servico.verificador_id
+    LEFT JOIN usuarios as aprovador ON aprovador.id = ordens_servico.aprovador_id
     LEFT JOIN tipos_falha ON tipos_falha.id = ordens_servico.tipo_falha_id
-    WHERE ordens_servico.id=?
+    WHERE ordens_servico.id = ?
     `,
     [id],
     (err, os) => {
@@ -1441,187 +1489,277 @@ function gerarRelatorio(id) {
 
           const arquivo = path.join("uploads", `relatorio_os_${id}.pdf`);
           const stream = fs.createWriteStream(arquivo);
-          const doc = new PDFDocument({ size: "A4", margin: 30 });
+          const doc = new PDFDocument({ size: "A4", margin: 22 });
 
           doc.pipe(stream);
+
+          const ticket = `TICKET OS-${os.id}`;
+          const dataAbertura = formatarDataBR(os.data_abertura);
+          const dataInicio = formatarDataHoraBR(os.data_inicio);
+          const dataFim = formatarDataHoraBR(os.data_fim);
+          const projeto = textoSeguro(os.usina);
+          const localProjeto = textoSeguro(os.usina_cidade || os.local);
+          const localInterno = textoSeguro(os.local || "Usina");
+          const descricaoOcorrencia = textoSeguro(os.descricao);
+          const descricaoAtividade = textoSeguro(os.observacoes);
+          const responsavelAtividade = textoSeguro(os.tecnico_nome);
+          const responsavelRealizacao = textoSeguro(os.tecnico_nome);
+          const responsavelValidacao = textoSeguro(os.verificador_nome);
+          const responsavelAceite = textoSeguro(os.aprovador_nome);
+          const dataFechamento = formatarDataBR(os.data_fim);
+          const tipoTrabalho = textoSeguro(os.tipo_falha_nome || os.tipo);
+          const criticidade = prioridadeParaCriticidade(os.prioridade);
+          const pontual = true;
+          const recorrente = false;
+          const programada = os.status === "aberta";
+          const naoProgramada = !programada;
 
           /* =========================
              PÁGINA 1
           ========================= */
 
-          // Moldura topo
-          doc.rect(30, 30, 535, 58).stroke();
+          // Header principal
+          caixa(doc, 20, 20, 555, 50);
+          caixa(doc, 20, 20, 120, 50);
+          caixa(doc, 140, 20, 290, 50);
+          caixa(doc, 430, 20, 75, 25);
+          caixa(doc, 505, 20, 70, 25);
+          caixa(doc, 430, 45, 75, 25);
+          caixa(doc, 505, 45, 70, 25);
 
-          // Coluna esquerda logo/nome
-          doc.rect(30, 30, 150, 58).stroke();
-          doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 55, 48);
+          textoCentro(doc, "ILUMISOL", 20, 38, 120, 15, 16, true);
+          textoCentro(doc, "ORDEM DE SERVIÇO", 140, 33, 290, 15, 13, true);
+          textoCentro(doc, "RELATÓRIO DE ATIVIDADES EXECUTADAS", 140, 50, 290, 12, 9, true);
 
-          // Coluna central título
-          doc.rect(180, 30, 170, 58).stroke();
-          doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 203, 46);
-          doc.font("Helvetica-Bold").fontSize(10).text("RELATÓRIO DE ATIVIDADES EXECUTADAS", 188, 62);
+          textoCentro(doc, "N°", 430, 25, 75, 10, 8, true);
+          textoCentro(doc, "DATA", 505, 25, 70, 10, 8, true);
+          textoCentro(doc, ticket, 430, 52, 75, 10, 8, false);
+          textoCentro(doc, dataAbertura, 505, 52, 70, 10, 8, false);
 
-          // Coluna direita
-          desenharCaixa(doc, 350, 30, 107, 29, "N°", `OS ${os.id}`);
-          desenharCaixa(doc, 457, 30, 108, 29, "DATA", formatarDataBR(os.data_abertura));
-          desenharCaixa(doc, 350, 59, 107, 29, "PROJETO", safeText(os.usina));
-          desenharCaixa(doc, 457, 59, 108, 29, "LOCAL", safeText(os.usina_cidade || os.local));
+          // Projeto / Local
+          caixa(doc, 20, 75, 370, 32);
+          caixa(doc, 390, 75, 185, 32);
+          doc.font("Helvetica-Bold").fontSize(8).text("Projeto", 24, 79);
+          doc.font("Helvetica-Bold").fontSize(8).text("LOCAL", 394, 79);
+          doc.font("Helvetica").fontSize(10).text(projeto, 24, 91, { width: 360, align: "center" });
+          doc.font("Helvetica").fontSize(10).text(localProjeto, 394, 91, { width: 175, align: "center" });
 
-          // Barra amarela
-          doc.rect(30, 96, 535, 15).fillAndStroke("#f4b400", "#000000");
-          doc.fillColor("#000000").font("Helvetica-Bold").fontSize(9).text(
-            "ORDEM DE SERVIÇO",
-            0,
-            100,
-            { width: 595, align: "center" }
-          );
+          // Local interno / datas
+          caixa(doc, 20, 111, 180, 28);
+          caixa(doc, 200, 111, 150, 28);
+          caixa(doc, 350, 111, 225, 28);
+          doc.font("Helvetica-Bold").fontSize(8).text("LOCAL:", 24, 115);
+          doc.font("Helvetica").fontSize(9).text(localInterno, 60, 115);
+          doc.font("Helvetica-Bold").fontSize(8).text("DATA INICIO", 204, 115);
+          doc.font("Helvetica").fontSize(9).text(dataInicio, 204, 126, { width: 140, align: "center" });
+          doc.font("Helvetica-Bold").fontSize(8).text("DATA FIM / TEMPO DA ATIVIDADE", 354, 115);
+          doc.font("Helvetica").fontSize(9).text(dataFim, 354, 126, { width: 215, align: "center" });
 
-          let y = 122;
+          // Ocorrência da atividade
+          caixa(doc, 20, 144, 555, 95);
+          doc.font("Helvetica-Bold").fontSize(9).text("OCORRÊNCIA DA ATIVIDADE", 24, 148);
+          doc.font("Helvetica").fontSize(9).text(descricaoOcorrencia, 24, 163, {
+            width: 547,
+            height: 70,
+            align: "justify",
+          });
 
-          doc.font("Helvetica-Bold").fontSize(10).text("OCORRÊNCIA DA ATIVIDADE", 35, y);
-          y += 16;
+          // Listagem de atividades
+          caixa(doc, 20, 244, 555, 110);
+          doc.font("Helvetica-Bold").fontSize(9).text("LISTAGEM DE ATIVIDADES", 24, 248);
 
-          doc.font("Helvetica").fontSize(10).text(
-            safeText(os.descricao),
-            35,
-            y,
-            { width: 520, align: "justify" }
-          );
+          // Cabeçalho tabela atividades
+          caixa(doc, 24, 263, 40, 20);
+          caixa(doc, 64, 263, 60, 20);
+          caixa(doc, 124, 263, 220, 20);
+          caixa(doc, 344, 263, 110, 20);
+          caixa(doc, 454, 263, 117, 20);
 
-          y += 70;
+          textoCentro(doc, "ATIV.", 24, 270, 40, 8, 8, true);
+          textoCentro(doc, "QTD", 64, 270, 60, 8, 8, true);
+          textoCentro(doc, "DESCRIÇÃO", 124, 270, 220, 8, 8, true);
+          textoCentro(doc, "RESPONSÁVEL", 344, 270, 110, 8, 8, true);
+          textoCentro(doc, "REFERÊNCIA", 454, 270, 117, 8, 8, true);
 
-          doc.font("Helvetica-Bold").fontSize(10).text("DESCRIÇÃO DA ATIVIDADE", 35, y);
-          y += 16;
+          // Linha 1
+          caixa(doc, 24, 283, 40, 28);
+          caixa(doc, 64, 283, 60, 28);
+          caixa(doc, 124, 283, 220, 28);
+          caixa(doc, 344, 283, 110, 28);
+          caixa(doc, 454, 283, 117, 28);
 
-          doc.font("Helvetica").fontSize(10).text(
-            safeText(os.observacoes),
-            35,
-            y,
-            { width: 520, align: "justify" }
-          );
+          textoCentro(doc, "1", 24, 293, 40, 8, 9, false);
+          textoCentro(doc, "1,00", 64, 293, 60, 8, 9, false);
+          doc.font("Helvetica").fontSize(8.5).text(tipoTrabalho, 128, 291, {
+            width: 212,
+            align: "center",
+          });
+          textoCentro(doc, responsavelAtividade, 344, 293, 110, 8, 8.5, false);
+          textoCentro(doc, "-", 454, 293, 117, 8, 8.5, false);
 
-          y += 75;
+          // Linhas vazias
+          for (let i = 0; i < 4; i++) {
+            const yy = 311 + i * 20;
+            caixa(doc, 24, yy, 40, 20);
+            caixa(doc, 64, yy, 60, 20);
+            caixa(doc, 124, yy, 220, 20);
+            caixa(doc, 344, yy, 110, 20);
+            caixa(doc, 454, yy, 117, 20);
+            textoCentro(doc, `${i + 2}`, 24, yy + 6, 40, 8, 8, false);
+          }
 
-          doc.font("Helvetica-Bold").fontSize(10).text("RESPONSÁVEIS", 35, y);
-          y += 18;
+          // Criticidade
+          caixa(doc, 20, 360, 270, 84);
+          doc.font("Helvetica-Bold").fontSize(9).text("CRITICIDADE DA ATIVIDADE", 24, 364);
 
-          doc.rect(35, y, 170, 36).stroke();
-          doc.rect(205, y, 170, 36).stroke();
-          doc.rect(375, y, 170, 36).stroke();
-
-          doc.font("Helvetica-Bold").fontSize(8).text("Responsável Realização", 40, y + 5);
-          doc.font("Helvetica").fontSize(10).text(safeText(os.tecnico_nome), 40, y + 18);
-
-          doc.font("Helvetica-Bold").fontSize(8).text("Responsável Validação", 210, y + 5);
-          doc.font("Helvetica").fontSize(10).text(safeText(os.verificador_id ? `ID ${os.verificador_id}` : "-"), 210, y + 18);
-
-          doc.font("Helvetica-Bold").fontSize(8).text("Responsável Aceite", 380, y + 5);
-          doc.font("Helvetica").fontSize(10).text(safeText(os.aprovador_id ? `ID ${os.aprovador_id}` : "-"), 380, y + 18);
-
-          y += 55;
-
-          doc.font("Helvetica-Bold").fontSize(10).text("CLASSIFICAÇÃO", 35, y);
-          y += 18;
-
-          doc.rect(35, y, 170, 50).stroke();
-          doc.rect(205, y, 170, 50).stroke();
-          doc.rect(375, y, 170, 50).stroke();
-
-          doc.font("Helvetica-Bold").fontSize(8).text("CRITICIDADE", 40, y + 5);
-          doc.font("Helvetica").fontSize(10).text(safeText(os.prioridade), 40, y + 22);
-
-          doc.font("Helvetica-Bold").fontSize(8).text("TIPO DE ORDEM DE SERVIÇO", 210, y + 5);
-          doc.font("Helvetica").fontSize(9).text(`Programada: ${valorSimNao(os.status === "aberta")}`, 210, y + 20);
-          doc.text(`Não programada: ${valorSimNao(os.status !== "aberta")}`, 210, y + 33);
-
-          doc.font("Helvetica-Bold").fontSize(8).text("DATAS", 380, y + 5);
-          doc.font("Helvetica").fontSize(9).text(`Início: ${safeText(formatarDataBR(os.data_inicio))}`, 380, y + 20);
-          doc.text(`Fim: ${safeText(formatarDataBR(os.data_fim))}`, 380, y + 33);
-
-          y += 68;
-
-          doc.font("Helvetica-Bold").fontSize(10).text("DADOS COMPLEMENTARES", 35, y);
-          y += 16;
-
-          doc.font("Helvetica").fontSize(10).text(`Tipo de trabalho: ${safeText(os.tipo_falha_nome || os.tipo)}`, 35, y);
-          y += 14;
-          doc.text(`Solicitante: ${safeText(os.solicitante)}`, 35, y);
-          y += 14;
-          doc.text(`Local: ${safeText(os.local)}`, 35, y);
-          y += 14;
-          doc.text(`Equipamento: ${safeText(os.equipamento)}`, 35, y);
-
+          marcar(doc, 26, 382, criticidade === "leve");
           doc.font("Helvetica").fontSize(8).text(
-            `GERADO POR: ${safeText(os.tecnico_nome)}`,
-            35,
-            780
+            "Leve - Atividades que não impactam a geração da usina",
+            42,
+            381,
+            { width: 238 }
           );
-          doc.text(`OS_${id}`, 250, 780);
-          doc.text(`1 / 2`, 530, 780);
+
+          marcar(doc, 26, 405, criticidade === "moderada");
+          doc.font("Helvetica").fontSize(8).text(
+            "Moderada - Atividades necessárias para melhoria de geração da usina",
+            42,
+            404,
+            { width: 238 }
+          );
+
+          marcar(doc, 26, 428, criticidade === "grave");
+          doc.font("Helvetica").fontSize(8).text(
+            "Grave - Atividades com impacto significativo na geração da usina",
+            42,
+            427,
+            { width: 238 }
+          );
+
+          // Tipo de ordem
+          caixa(doc, 295, 360, 280, 84);
+          doc.font("Helvetica-Bold").fontSize(9).text("TIPO DE ORDEM DE SERVIÇO", 299, 364);
+
+          marcar(doc, 301, 384, pontual);
+          doc.font("Helvetica").fontSize(8.5).text("PONTUAL", 317, 383);
+
+          marcar(doc, 391, 384, recorrente);
+          doc.font("Helvetica").fontSize(8.5).text("RECORRENTE", 407, 383);
+
+          marcar(doc, 301, 410, programada);
+          doc.font("Helvetica").fontSize(8.5).text("PROGRAMADA", 317, 409);
+
+          marcar(doc, 391, 410, naoProgramada);
+          doc.font("Helvetica").fontSize(8.5).text("NÃO PROGRAMADA", 407, 409);
+
+          // Responsáveis / fechamento
+          caixa(doc, 20, 450, 555, 42);
+          caixa(doc, 20, 450, 138, 42);
+          caixa(doc, 158, 450, 138, 42);
+          caixa(doc, 296, 450, 138, 42);
+          caixa(doc, 434, 450, 141, 42);
+
+          doc.font("Helvetica-Bold").fontSize(8).text("Responsável Realização", 24, 455);
+          doc.font("Helvetica").fontSize(9).text(responsavelRealizacao, 24, 469, { width: 130, align: "center" });
+
+          doc.font("Helvetica-Bold").fontSize(8).text("Responsável Validação", 162, 455);
+          doc.font("Helvetica").fontSize(9).text(responsavelValidacao, 162, 469, { width: 130, align: "center" });
+
+          doc.font("Helvetica-Bold").fontSize(8).text("Responsável Aceite", 300, 455);
+          doc.font("Helvetica").fontSize(9).text(responsavelAceite, 300, 469, { width: 130, align: "center" });
+
+          doc.font("Helvetica-Bold").fontSize(8).text("Data de Fechamento da OS", 438, 455);
+          doc.font("Helvetica").fontSize(9).text(dataFechamento, 438, 469, { width: 133, align: "center" });
+
+          // Bloco atividade principal
+          caixa(doc, 20, 498, 555, 210);
+          doc.font("Helvetica-Bold").fontSize(9).text(`RESPONSÁVEL DA ATIVIDADE: ${responsavelAtividade}`, 24, 503);
+          doc.font("Helvetica-Bold").fontSize(9).text(`ATIVIDADE: ${tipoTrabalho}`, 24, 519);
+          doc.font("Helvetica-Bold").fontSize(9).text("Descrição:", 24, 535);
+          doc.font("Helvetica").fontSize(9).text(descricaoAtividade !== "-" ? descricaoAtividade : descricaoOcorrencia, 24, 550, {
+            width: 545,
+            height: 145,
+            align: "justify",
+          });
+
+          doc.font("Helvetica").fontSize(8).text(`GERADO POR: ${responsavelAtividade}`, 24, 802);
+          doc.text(`FORM-138 REV00`, 250, 802);
+          doc.text(`OS_${id} 1 / 2`, 480, 802);
 
           /* =========================
              PÁGINA 2
           ========================= */
 
-          doc.addPage({ size: "A4", margin: 30 });
+          doc.addPage({ size: "A4", margin: 22 });
 
-          doc.rect(30, 30, 535, 58).stroke();
-          doc.rect(30, 30, 150, 58).stroke();
-          doc.rect(180, 30, 170, 58).stroke();
-          desenharCaixa(doc, 350, 30, 107, 29, "N°", `OS ${os.id}`);
-          desenharCaixa(doc, 457, 30, 108, 29, "DATA", formatarDataBR(os.data_abertura));
-          desenharCaixa(doc, 350, 59, 107, 29, "PROJETO", safeText(os.usina));
-          desenharCaixa(doc, 457, 59, 108, 29, "LOCAL", safeText(os.usina_cidade || os.local));
+          caixa(doc, 20, 20, 555, 50);
+          caixa(doc, 20, 20, 120, 50);
+          caixa(doc, 140, 20, 290, 50);
+          caixa(doc, 430, 20, 75, 25);
+          caixa(doc, 505, 20, 70, 25);
+          caixa(doc, 430, 45, 75, 25);
+          caixa(doc, 505, 45, 70, 25);
 
-          doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 55, 48);
-          doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 203, 46);
-          doc.font("Helvetica-Bold").fontSize(10).text("RELATÓRIO DE ATIVIDADES EXECUTADAS", 188, 62);
+          textoCentro(doc, "ILUMISOL", 20, 38, 120, 15, 16, true);
+          textoCentro(doc, "ORDEM DE SERVIÇO", 140, 33, 290, 15, 13, true);
+          textoCentro(doc, "RELATÓRIO DE ATIVIDADES EXECUTADAS", 140, 50, 290, 12, 9, true);
 
-          doc.rect(30, 96, 535, 15).fillAndStroke("#f4b400", "#000000");
+          textoCentro(doc, "N°", 430, 25, 75, 10, 8, true);
+          textoCentro(doc, "DATA", 505, 25, 70, 10, 8, true);
+          textoCentro(doc, ticket, 430, 52, 75, 10, 8, false);
+          textoCentro(doc, dataAbertura, 505, 52, 70, 10, 8, false);
+
+          caixa(doc, 20, 75, 370, 32);
+          caixa(doc, 390, 75, 185, 32);
+          doc.font("Helvetica-Bold").fontSize(8).text("PROJETO", 24, 79);
+          doc.font("Helvetica-Bold").fontSize(8).text("LOCAL", 394, 79);
+          doc.font("Helvetica").fontSize(10).text(projeto, 24, 91, { width: 360, align: "center" });
+          doc.font("Helvetica").fontSize(10).text(localProjeto, 394, 91, { width: 175, align: "center" });
+
+          doc.rect(20, 112, 555, 16).fillAndStroke("#f4b400", "#000000");
           doc.fillColor("#000000").font("Helvetica-Bold").fontSize(9).text(
             "REGISTRO FOTOGRÁFICO",
             0,
-            100,
+            116,
             { width: 595, align: "center" }
           );
 
-          const caixas = [
-            { x: 30, y: 120, w: 262, h: 250, titulo: "FOTO 1" },
-            { x: 303, y: 120, w: 262, h: 250, titulo: "FOTO 2" },
-            { x: 30, y: 381, w: 262, h: 250, titulo: "FOTO 3" },
-            { x: 303, y: 381, w: 262, h: 250, titulo: "FOTO 4" },
+          const quadros = [
+            { x: 20, y: 138, w: 268, h: 280, titulo: "FOTO 1" },
+            { x: 307, y: 138, w: 268, h: 280, titulo: "FOTO 2" },
+            { x: 20, y: 438, w: 268, h: 280, titulo: "FOTO 3" },
+            { x: 307, y: 438, w: 268, h: 280, titulo: "FOTO 4" },
           ];
 
-          caixas.forEach((caixa, index) => {
-            doc.rect(caixa.x, caixa.y, caixa.w, caixa.h).stroke();
+          quadros.forEach((q, index) => {
+            caixa(doc, q.x, q.y, q.w, q.h);
 
             const foto = fotos[index];
             if (foto) {
               const caminhoImagem = path.join("uploads", foto.caminho);
               if (fs.existsSync(caminhoImagem)) {
                 try {
-                  doc.image(caminhoImagem, caixa.x + 8, caixa.y + 8, {
-                    fit: [caixa.w - 16, caixa.h - 35],
+                  doc.image(caminhoImagem, q.x + 8, q.y + 14, {
+                    fit: [q.w - 16, q.h - 34],
                     align: "center",
                     valign: "center",
                   });
                 } catch (e) {
-                  doc.font("Helvetica").fontSize(9).text("Erro ao carregar imagem", caixa.x + 10, caixa.y + 100);
+                  doc.font("Helvetica").fontSize(9).text("Erro ao carregar imagem", q.x + 20, q.y + 120);
                 }
               }
             }
 
             doc.font("Helvetica-Bold").fontSize(9).text(
-              caixa.titulo,
-              caixa.x,
-              caixa.y + caixa.h - 18,
-              { width: caixa.w, align: "center" }
+              q.titulo,
+              q.x,
+              q.y + 4,
+              { width: q.w, align: "center" }
             );
           });
 
-          doc.font("Helvetica").fontSize(8).text("FORM-138 REV00", 30, 780);
-          doc.text(`OS_${id}`, 250, 780);
-          doc.text(`2 / 2`, 530, 780);
+          doc.font("Helvetica").fontSize(8).text(`FORM-138 REV00`, 24, 802);
+          doc.text(`OS_${id} 2 / 2`, 480, 802);
 
           doc.end();
 
