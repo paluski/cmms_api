@@ -1378,12 +1378,40 @@ app.get("/dashboard", auth, (req, res) => {
    GERAR PDF
 ============================== */
 
+function formatarDataBR(dataTexto) {
+  if (!dataTexto) return "-";
+  const d = new Date(dataTexto);
+  if (Number.isNaN(d.getTime())) return dataTexto;
+  return d.toLocaleDateString("pt-BR");
+}
+
+function valorSimNao(condicao) {
+  return condicao ? "X" : "";
+}
+
+function safeText(valor) {
+  return normalizarTexto(valor || "-");
+}
+
+function desenharCaixa(doc, x, y, w, h, titulo, valor) {
+  doc.rect(x, y, w, h).stroke();
+  doc.font("Helvetica-Bold").fontSize(8).text(titulo, x + 4, y + 4, {
+    width: w - 8,
+    align: "center",
+  });
+  doc.font("Helvetica").fontSize(9).text(valor, x + 4, y + 18, {
+    width: w - 8,
+    align: "center",
+  });
+}
+
 function gerarRelatorio(id) {
   db.get(
     `
     SELECT 
       ordens_servico.*,
       usinas.nome as usina,
+      usinas.cidade as usina_cidade,
       usuarios.nome as tecnico_nome,
       tipos_falha.nome as tipo_falha_nome
     FROM ordens_servico
@@ -1396,50 +1424,215 @@ function gerarRelatorio(id) {
     (err, os) => {
       if (err || !os) return;
 
-      const arquivo = path.join("uploads", `relatorio_os_${id}.pdf`);
-      const stream = fs.createWriteStream(arquivo);
-      const doc = new PDFDocument({ margin: 40 });
+      db.all(
+        `
+        SELECT * FROM fotos
+        WHERE ordem_id = ?
+        ORDER BY id ASC
+        `,
+        [id],
+        (errFotos, fotos) => {
+          if (errFotos) return;
 
-      doc.pipe(stream);
+          const arquivo = path.join("uploads", `relatorio_os_${id}.pdf`);
+          const stream = fs.createWriteStream(arquivo);
+          const doc = new PDFDocument({ size: "A4", margin: 30 });
 
-      doc.fontSize(20).text("RELATÓRIO DE ORDEM DE SERVIÇO");
-      doc.moveDown();
+          doc.pipe(stream);
 
-      doc.fontSize(12).text(`OS: ${os.id}`);
-      doc.text(`Usina: ${normalizarTexto(os.usina)}`);
-      doc.text(`Tipo: ${normalizarTexto(os.tipo_falha_nome || os.tipo)}`);
-      doc.text(`Descrição: ${normalizarTexto(os.descricao)}`);
-      doc.text(`Status: ${normalizarTexto(os.status)}`);
-      doc.text(`Prioridade: ${normalizarTexto(os.prioridade)}`);
-      doc.text(`Solicitante: ${normalizarTexto(os.solicitante)}`);
-      doc.text(`Local: ${normalizarTexto(os.local)}`);
-      doc.text(`Equipamento: ${normalizarTexto(os.equipamento)}`);
-      doc.text(`Técnico: ${normalizarTexto(os.tecnico_nome)}`);
-      doc.text(`Abertura: ${normalizarTexto(os.data_abertura)}`);
-      doc.text(`Programação: ${normalizarTexto(os.data_programacao)}`);
-      doc.text(`Início: ${normalizarTexto(os.data_inicio)}`);
-      doc.text(`Fim: ${normalizarTexto(os.data_fim)}`);
-      doc.text(`Envio para verificação: ${normalizarTexto(os.data_envio_verificacao)}`);
-      doc.text(`Verificação: ${normalizarTexto(os.data_verificacao)}`);
-      doc.text(`Aprovação: ${normalizarTexto(os.data_aprovacao)}`);
-      doc.text(`Observações: ${normalizarTexto(os.observacoes)}`);
-      doc.text(`Parecer verificação: ${normalizarTexto(os.parecer_verificacao)}`);
-      doc.text(`Parecer aprovação: ${normalizarTexto(os.parecer_aprovacao)}`);
-      doc.text(`Motivo reprovação: ${normalizarTexto(os.motivo_reprovacao)}`);
+          /* =========================
+             PÁGINA 1
+          ========================= */
 
-      doc.end();
+          // Moldura topo
+          doc.rect(30, 30, 535, 58).stroke();
 
-      stream.on("finish", () => {
-        db.run(`DELETE FROM relatorios WHERE ordem_id=?`, [id], () => {
-          db.run(
-            `
-            INSERT INTO relatorios(ordem_id,arquivo,data)
-            VALUES(?,?,datetime('now','localtime'))
-            `,
-            [id, arquivo]
+          // Coluna esquerda logo/nome
+          doc.rect(30, 30, 150, 58).stroke();
+          doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 55, 48);
+
+          // Coluna central título
+          doc.rect(180, 30, 170, 58).stroke();
+          doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 203, 46);
+          doc.font("Helvetica-Bold").fontSize(10).text("RELATÓRIO DE ATIVIDADES EXECUTADAS", 188, 62);
+
+          // Coluna direita
+          desenharCaixa(doc, 350, 30, 107, 29, "N°", `OS ${os.id}`);
+          desenharCaixa(doc, 457, 30, 108, 29, "DATA", formatarDataBR(os.data_abertura));
+          desenharCaixa(doc, 350, 59, 107, 29, "PROJETO", safeText(os.usina));
+          desenharCaixa(doc, 457, 59, 108, 29, "LOCAL", safeText(os.usina_cidade || os.local));
+
+          // Barra amarela
+          doc.rect(30, 96, 535, 15).fillAndStroke("#f4b400", "#000000");
+          doc.fillColor("#000000").font("Helvetica-Bold").fontSize(9).text(
+            "ORDEM DE SERVIÇO",
+            0,
+            100,
+            { width: 595, align: "center" }
           );
-        });
-      });
+
+          let y = 122;
+
+          doc.font("Helvetica-Bold").fontSize(10).text("OCORRÊNCIA DA ATIVIDADE", 35, y);
+          y += 16;
+
+          doc.font("Helvetica").fontSize(10).text(
+            safeText(os.descricao),
+            35,
+            y,
+            { width: 520, align: "justify" }
+          );
+
+          y += 70;
+
+          doc.font("Helvetica-Bold").fontSize(10).text("DESCRIÇÃO DA ATIVIDADE", 35, y);
+          y += 16;
+
+          doc.font("Helvetica").fontSize(10).text(
+            safeText(os.observacoes),
+            35,
+            y,
+            { width: 520, align: "justify" }
+          );
+
+          y += 75;
+
+          doc.font("Helvetica-Bold").fontSize(10).text("RESPONSÁVEIS", 35, y);
+          y += 18;
+
+          doc.rect(35, y, 170, 36).stroke();
+          doc.rect(205, y, 170, 36).stroke();
+          doc.rect(375, y, 170, 36).stroke();
+
+          doc.font("Helvetica-Bold").fontSize(8).text("Responsável Realização", 40, y + 5);
+          doc.font("Helvetica").fontSize(10).text(safeText(os.tecnico_nome), 40, y + 18);
+
+          doc.font("Helvetica-Bold").fontSize(8).text("Responsável Validação", 210, y + 5);
+          doc.font("Helvetica").fontSize(10).text(safeText(os.verificador_id ? `ID ${os.verificador_id}` : "-"), 210, y + 18);
+
+          doc.font("Helvetica-Bold").fontSize(8).text("Responsável Aceite", 380, y + 5);
+          doc.font("Helvetica").fontSize(10).text(safeText(os.aprovador_id ? `ID ${os.aprovador_id}` : "-"), 380, y + 18);
+
+          y += 55;
+
+          doc.font("Helvetica-Bold").fontSize(10).text("CLASSIFICAÇÃO", 35, y);
+          y += 18;
+
+          doc.rect(35, y, 170, 50).stroke();
+          doc.rect(205, y, 170, 50).stroke();
+          doc.rect(375, y, 170, 50).stroke();
+
+          doc.font("Helvetica-Bold").fontSize(8).text("CRITICIDADE", 40, y + 5);
+          doc.font("Helvetica").fontSize(10).text(safeText(os.prioridade), 40, y + 22);
+
+          doc.font("Helvetica-Bold").fontSize(8).text("TIPO DE ORDEM DE SERVIÇO", 210, y + 5);
+          doc.font("Helvetica").fontSize(9).text(`Programada: ${valorSimNao(os.status === "aberta")}`, 210, y + 20);
+          doc.text(`Não programada: ${valorSimNao(os.status !== "aberta")}`, 210, y + 33);
+
+          doc.font("Helvetica-Bold").fontSize(8).text("DATAS", 380, y + 5);
+          doc.font("Helvetica").fontSize(9).text(`Início: ${safeText(formatarDataBR(os.data_inicio))}`, 380, y + 20);
+          doc.text(`Fim: ${safeText(formatarDataBR(os.data_fim))}`, 380, y + 33);
+
+          y += 68;
+
+          doc.font("Helvetica-Bold").fontSize(10).text("DADOS COMPLEMENTARES", 35, y);
+          y += 16;
+
+          doc.font("Helvetica").fontSize(10).text(`Tipo de trabalho: ${safeText(os.tipo_falha_nome || os.tipo)}`, 35, y);
+          y += 14;
+          doc.text(`Solicitante: ${safeText(os.solicitante)}`, 35, y);
+          y += 14;
+          doc.text(`Local: ${safeText(os.local)}`, 35, y);
+          y += 14;
+          doc.text(`Equipamento: ${safeText(os.equipamento)}`, 35, y);
+
+          doc.font("Helvetica").fontSize(8).text(
+            `GERADO POR: ${safeText(os.tecnico_nome)}`,
+            35,
+            780
+          );
+          doc.text(`OS_${id}`, 250, 780);
+          doc.text(`1 / 2`, 530, 780);
+
+          /* =========================
+             PÁGINA 2
+          ========================= */
+
+          doc.addPage({ size: "A4", margin: 30 });
+
+          doc.rect(30, 30, 535, 58).stroke();
+          doc.rect(30, 30, 150, 58).stroke();
+          doc.rect(180, 30, 170, 58).stroke();
+          desenharCaixa(doc, 350, 30, 107, 29, "N°", `OS ${os.id}`);
+          desenharCaixa(doc, 457, 30, 108, 29, "DATA", formatarDataBR(os.data_abertura));
+          desenharCaixa(doc, 350, 59, 107, 29, "PROJETO", safeText(os.usina));
+          desenharCaixa(doc, 457, 59, 108, 29, "LOCAL", safeText(os.usina_cidade || os.local));
+
+          doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 55, 48);
+          doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 203, 46);
+          doc.font("Helvetica-Bold").fontSize(10).text("RELATÓRIO DE ATIVIDADES EXECUTADAS", 188, 62);
+
+          doc.rect(30, 96, 535, 15).fillAndStroke("#f4b400", "#000000");
+          doc.fillColor("#000000").font("Helvetica-Bold").fontSize(9).text(
+            "REGISTRO FOTOGRÁFICO",
+            0,
+            100,
+            { width: 595, align: "center" }
+          );
+
+          const caixas = [
+            { x: 30, y: 120, w: 262, h: 250, titulo: "FOTO 1" },
+            { x: 303, y: 120, w: 262, h: 250, titulo: "FOTO 2" },
+            { x: 30, y: 381, w: 262, h: 250, titulo: "FOTO 3" },
+            { x: 303, y: 381, w: 262, h: 250, titulo: "FOTO 4" },
+          ];
+
+          caixas.forEach((caixa, index) => {
+            doc.rect(caixa.x, caixa.y, caixa.w, caixa.h).stroke();
+
+            const foto = fotos[index];
+            if (foto) {
+              const caminhoImagem = path.join("uploads", foto.caminho);
+              if (fs.existsSync(caminhoImagem)) {
+                try {
+                  doc.image(caminhoImagem, caixa.x + 8, caixa.y + 8, {
+                    fit: [caixa.w - 16, caixa.h - 35],
+                    align: "center",
+                    valign: "center",
+                  });
+                } catch (e) {
+                  doc.font("Helvetica").fontSize(9).text("Erro ao carregar imagem", caixa.x + 10, caixa.y + 100);
+                }
+              }
+            }
+
+            doc.font("Helvetica-Bold").fontSize(9).text(
+              caixa.titulo,
+              caixa.x,
+              caixa.y + caixa.h - 18,
+              { width: caixa.w, align: "center" }
+            );
+          });
+
+          doc.font("Helvetica").fontSize(8).text("FORM-138 REV00", 30, 780);
+          doc.text(`OS_${id}`, 250, 780);
+          doc.text(`2 / 2`, 530, 780);
+
+          doc.end();
+
+          stream.on("finish", () => {
+            db.run(`DELETE FROM relatorios WHERE ordem_id=?`, [id], () => {
+              db.run(
+                `
+                INSERT INTO relatorios(ordem_id,arquivo,data)
+                VALUES(?,?,datetime('now','localtime'))
+                `,
+                [id, arquivo]
+              );
+            });
+          });
+        }
+      );
     }
   );
 }
