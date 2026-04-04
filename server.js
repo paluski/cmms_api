@@ -27,7 +27,12 @@ app.use(express.urlencoded({
 }));
 
 app.use((req, res, next) => {
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  if (
+    !req.path.startsWith("/relatorio") &&
+    !req.path.startsWith("/uploads")
+  ) {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+  }
   next();
 });
 
@@ -1665,7 +1670,7 @@ app.post("/relatorio/:id/gerar", auth, (req, res) => {
   });
 });
 
-app.get("/relatorio/:id", (req, res) => {
+app.get("/relatorio/:id", auth, (req, res) => {
   db.get(
     `
     SELECT * FROM relatorios
@@ -1686,6 +1691,7 @@ app.get("/relatorio/:id", (req, res) => {
         return res.status(404).json({ erro: "Relatório não encontrado" });
       }
 
+      res.setHeader("Content-Type", "application/pdf");
       return res.sendFile(path.resolve(row.arquivo));
     }
   );
