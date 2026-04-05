@@ -1990,20 +1990,14 @@ function gerarRelatorio(id) {
 
           y += 50;
 
-          /*drawWrappedField(
+          drawWrappedField(
             doc,
             y,
             `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\n\n\n\n\nATIVIDADE: ${tipoTrabalho}\n\n\n\n\nDescrição:\n${descricaoAtividade}`,0
             ,
             180
-          );*/
-          drawWrappedField(doc, y, [
-            { text: `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\n\n\n\n\n`, bold: true },
-            { text: `ATIVIDADE: ${tipoTrabalho}\n\n\n\n\n`, bold: true },
-            { text: `Descrição:\n`, bold: true },
-            { text: descricaoAtividade, bold: false }
-          ], 0, 180);
-          
+          );
+
           doc.font("Helvetica").fontSize(8).text(`GERADO POR: ${respAtividade}`, 24, 802);
           doc.text("FORM-138 REV00", 250, 802);
           doc.text(`OS_${id} 1 / 2`, 490, 802);
