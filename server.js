@@ -1601,12 +1601,15 @@ function drawCheckboxLine(doc, x, y, label, checked) {
 }
 
 function drawPhotoFrame(doc, x, y, w, h, title, foto) {
+  // moldura
   doc.rect(x, y, w, h).stroke();
 
+  // título
   doc.font("Helvetica-Bold")
     .fontSize(9)
     .text(title, x, y + 4, { width: w, align: "center" });
 
+  // se não tiver foto
   if (!foto || !foto.caminho) {
     doc.font("Helvetica")
       .fontSize(9)
@@ -1617,10 +1620,12 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
     return;
   }
 
+  // 👇 AQUI nasce a variável caminhoImagem
   const caminhoImagem = path.join(__dirname, "uploads", foto.caminho);
 
   console.log("Tentando carregar:", caminhoImagem);
 
+  // valida existência
   if (!fs.existsSync(caminhoImagem)) {
     console.error("Imagem NÃO encontrada:", caminhoImagem);
 
@@ -1634,6 +1639,7 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
     return;
   }
 
+  // renderiza imagem
   try {
     doc.image(caminhoImagem, x + 8, y + 20, {
       fit: [w - 16, h - 30],
@@ -1650,265 +1656,6 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
         align: "center",
       });
   }
-}
-
-if (!fs.existsSync(caminhoImagem)) {
-  console.error("Imagem não encontrada no PDF:", caminhoImagem);
-  doc.font("Helvetica")
-    .fontSize(8)
-    .text(`Imagem não encontrada:\n${foto.caminho}`, x + 8, y + h / 2 - 12, {
-      width: w - 16,
-      align: "center",
-    });
-  return;
-}
-
-  try {
-    doc.image(caminhoImagem, imgX, imgY, {
-      fit: [imgW, imgH],
-      align: "center",
-      valign: "center",
-    });
-  } catch (e) {
-    console.error("Erro ao renderizar imagem no PDF:", caminhoImagem, e.message);
-    doc.font("Helvetica")
-      .fontSize(8)
-      .text(`Erro ao carregar imagem:\n${path.basename(caminhoImagem)}`, x + 8, y + h / 2 - 12, {
-        width: w - 16,
-        align: "center",
-      });
-  }
-
-function gerarRelatorio(id) {
-  db.get(
-    `
-    SELECT 
-      ordens_servico.*,
-      usinas.nome as usina,
-      usinas.cidade as usina_cidade,
-      tecnico.nome as tecnico_nome,
-      verificador.nome as verificador_nome,
-      aprovador.nome as aprovador_nome,
-      tipos_falha.nome as tipo_falha_nome
-    FROM ordens_servico
-    LEFT JOIN usinas ON usinas.id = ordens_servico.usina_id
-    LEFT JOIN usuarios as tecnico ON tecnico.id = ordens_servico.tecnico_id
-    LEFT JOIN usuarios as verificador ON verificador.id = ordens_servico.verificador_id
-    LEFT JOIN usuarios as aprovador ON aprovador.id = ordens_servico.aprovador_id
-    LEFT JOIN tipos_falha ON tipos_falha.id = ordens_servico.tipo_falha_id
-    WHERE ordens_servico.id = ?
-    `,
-    [id],
-    (err, os) => {
-      if (err || !os) {
-        console.error("Erro ao buscar OS para PDF:", err?.message);
-        return;
-      }
-
-      db.all(
-        `
-        SELECT * FROM fotos
-        WHERE ordem_id = ?
-        ORDER BY id ASC
-        `,
-        [id],
-        (errFotos, fotos) => {
-          if (errFotos) {
-            console.error("Erro ao buscar fotos para PDF:", errFotos.message);
-            return;
-          }
-
-          const arquivo = path.join("uploads", `relatorio_os_${id}.pdf`);
-          const stream = fs.createWriteStream(arquivo);
-          const doc = new PDFDocument({ size: "A4", margin: 20 });
-
-          doc.pipe(stream);
-
-          const ticket = `TICKET OS-${os.id}`;
-          const projeto = txt(os.usina);
-          const localProjeto = txt(os.usina_cidade || os.local);
-          const localInterno = txt(os.local || "Usina");
-          const tipoTrabalho = txt(os.tipo_falha_nome || os.tipo);
-          const descricaoOcorrencia = txt(os.descricao);
-          const descricaoAtividade = txt(os.observacoes || os.descricao);
-          const respAtividade = txt(os.tecnico_nome);
-          const respRealizacao = txt(os.tecnico_nome);
-          const respValidacao = txt(os.verificador_nome);
-          const respAceite = txt(os.aprovador_nome);
-          const dataAbertura = formatarDataBR(os.data_abertura);
-          const dataInicio = formatarDataHoraBR(os.data_inicio);
-          const dataFim = formatarDataHoraBR(os.data_fim);
-          const dataFechamento = formatarDataBR(os.data_fim);
-
-          /* ========= PÁGINA 1 ========= */
-
-          // Cabeçalho
-          drawBox(doc, 20, 20, 555, 50);
-          drawBox(doc, 20, 20, 120, 50);
-          drawBox(doc, 140, 20, 290, 50);
-          drawLabelValue(doc, 430, 20, 75, 25, "N°", ticket, { align: "center", valueSize: 8 });
-          drawLabelValue(doc, 505, 20, 70, 25, "DATA", dataAbertura, { align: "center", valueSize: 8 });
-
-          doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 20, 37, { width: 120, align: "center" });
-          doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 140, 32, {
-            width: 290,
-            align: "center",
-          });
-          doc.font("Helvetica-Bold").fontSize(9).text("RELATÓRIO DE ATIVIDADES EXECUTADAS", 140, 49, {
-            width: 290,
-            align: "center",
-          });
-
-          drawLabelValue(doc, 20, 75, 370, 32, "Projeto", projeto, { align: "center", valueSize: 10 });
-          drawLabelValue(doc, 390, 75, 185, 32, "LOCAL", localProjeto, { align: "center", valueSize: 10 });
-
-          drawLabelValue(doc, 20, 111, 180, 30, "LOCAL:", localInterno, { valueSize: 9 });
-          drawLabelValue(doc, 200, 111, 150, 30, "DATA INICIO", dataInicio, { align: "center", valueSize: 8.5 });
-          drawLabelValue(doc, 350, 111, 225, 30, "DATA FIM / TEMPO DA ATIVIDADE", dataFim, {
-            align: "center",
-            valueSize: 8.5,
-          });
-
-          let y = 146;
-
-          drawSectionTitle(doc, y, "OCORRÊNCIA DA ATIVIDADE");
-          y += 22;
-          y = drawWrappedField(doc, y, "", descricaoOcorrencia, 90);
-
-          drawSectionTitle(doc, y, "LISTAGEM DE ATIVIDADES");
-          y += 22;
-
-          y = drawSimpleTableHeader(doc, y);
-          y = drawSimpleTableRow(doc, y, {
-            ativ: "1",
-            qtd: "1,00",
-            descricao: tipoTrabalho,
-            responsavel: respAtividade,
-            referencia: "-",
-          });
-
-          for (let i = 2; i <= 5; i++) {
-            y = drawSimpleTableRow(doc, y, {
-              ativ: String(i),
-              qtd: "",
-              descricao: "",
-              responsavel: "",
-              referencia: "",
-            });
-          }
-
-          y += 10;
-
-          // Criticidade / Tipo OS
-          drawBox(doc, 20, y, 270, 84);
-          doc.font("Helvetica-Bold").fontSize(9).text("CRITICIDADE DA ATIVIDADE", 24, y + 5);
-          drawCheckboxLine(doc, 26, y + 24, "Leve", String(os.prioridade).toLowerCase() === "baixa");
-          drawCheckboxLine(doc, 26, y + 44, "Moderada", String(os.prioridade).toLowerCase() === "media");
-          drawCheckboxLine(
-            doc,
-            26,
-            y + 64,
-            "Grave",
-            ["alta", "critica"].includes(String(os.prioridade).toLowerCase())
-          );
-
-          drawBox(doc, 305, y, 270, 84);
-          doc.font("Helvetica-Bold").fontSize(9).text("TIPO DE ORDEM DE SERVIÇO", 309, y + 5);
-          drawCheckboxLine(doc, 311, y + 24, "PONTUAL", true);
-          drawCheckboxLine(doc, 411, y + 24, "RECORRENTE", false);
-          drawCheckboxLine(doc, 311, y + 44, "PROGRAMADA", false);
-          drawCheckboxLine(doc, 411, y + 44, "NÃO PROGRAMADA", true);
-
-          y += 94;
-
-          // Responsáveis
-          drawLabelValue(doc, 20, y, 135, 40, "Responsável Realização", respRealizacao, {
-            align: "center",
-            valueSize: 8.5,
-          });
-          drawLabelValue(doc, 155, y, 135, 40, "Responsável Validação", respValidacao, {
-            align: "center",
-            valueSize: 8.5,
-          });
-          drawLabelValue(doc, 290, y, 135, 40, "Responsável Aceite", respAceite, {
-            align: "center",
-            valueSize: 8.5,
-          });
-          drawLabelValue(doc, 425, y, 150, 40, "Data de Fechamento da OS", dataFechamento, {
-            align: "center",
-            valueSize: 8.5,
-          });
-
-          y += 50;
-
-y = drawWrappedField(
-  doc,
-  y,
-  `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\nATIVIDADE: ${tipoTrabalho}\nDESCRIÇÃO:`,
-  descricaoAtividade,
-  220
-);
-
-          doc.font("Helvetica").fontSize(8).text(`GERADO POR: ${respAtividade}`, 24, 802);
-          doc.text("FORM-138 REV00", 250, 802);
-          doc.text(`OS_${id} 1 / 2`, 490, 802);
-
-          /* ========= PÁGINA 2 ========= */
-
-          doc.addPage({ size: "A4", margin: 20 });
-
-          drawBox(doc, 20, 20, 555, 50);
-          drawBox(doc, 20, 20, 120, 50);
-          drawBox(doc, 140, 20, 290, 50);
-          drawLabelValue(doc, 430, 20, 75, 25, "N°", ticket, { align: "center", valueSize: 8 });
-          drawLabelValue(doc, 505, 20, 70, 25, "DATA", dataAbertura, { align: "center", valueSize: 8 });
-
-          doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 20, 37, { width: 120, align: "center" });
-          doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 140, 32, {
-            width: 290,
-            align: "center",
-          });
-          doc.font("Helvetica-Bold").fontSize(9).text("RELATÓRIO DE ATIVIDADES EXECUTADAS", 140, 49, {
-            width: 290,
-            align: "center",
-          });
-
-          drawLabelValue(doc, 20, 75, 370, 32, "PROJETO", projeto, { align: "center", valueSize: 10 });
-          drawLabelValue(doc, 390, 75, 185, 32, "LOCAL", localProjeto, { align: "center", valueSize: 10 });
-
-          drawSectionTitle(doc, 112, "REGISTRO FOTOGRÁFICO");
-
-          const frames = [
-            { x: 20, y: 138, w: 268, h: 280, title: "FOTO 1", foto: fotos[0] },
-            { x: 307, y: 138, w: 268, h: 280, title: "FOTO 2", foto: fotos[1] },
-            { x: 20, y: 438, w: 268, h: 280, title: "FOTO 3", foto: fotos[2] },
-            { x: 307, y: 438, w: 268, h: 280, title: "FOTO 4", foto: fotos[3] },
-          ];
-
-          frames.forEach((f) => {
-            drawPhotoFrame(doc, f.x, f.y, f.w, f.h, f.title, f.foto);
-          });
-
-          doc.font("Helvetica").fontSize(8).text("FORM-138 REV00", 24, 802);
-          doc.text(`OS_${id} 2 / 2`, 490, 802);
-
-          doc.end();
-
-          stream.on("finish", () => {
-            db.run(`DELETE FROM relatorios WHERE ordem_id=?`, [id], () => {
-              db.run(
-                `
-                INSERT INTO relatorios(ordem_id,arquivo,data)
-                VALUES(?,?,datetime('now','localtime'))
-                `,
-                [id, arquivo]
-              );
-            });
-          });
-        }
-      );
-    }
-  );
 }
 /* ==============================
    RELATÓRIO
