@@ -14,7 +14,11 @@ const SECRET = "segredo_super";
    MIDDLEWARE
 ============================== */
 
-app.use(cors());
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
 
 app.use(express.json({
   limit: "20mb",
@@ -1664,8 +1668,11 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
 app.post("/relatorio/:id/gerar", auth, (req, res) => {
   const id = req.params.id;
 
+  console.log("Iniciando geração de PDF da OS:", id);
+
   db.get(`SELECT id FROM ordens_servico WHERE id=?`, [id], (err, row) => {
     if (err) {
+      console.error("Erro ao consultar OS para PDF:", err.message);
       return res.status(500).json({
         erro: "Erro ao gerar relatório",
         detalhe: err.message,
@@ -1676,12 +1683,20 @@ app.post("/relatorio/:id/gerar", auth, (req, res) => {
       return res.status(404).json({ erro: "OS não encontrada" });
     }
 
-    gerarRelatorio(id);
+    try {
+      gerarRelatorio(id);
 
-    return res.json({
-      ok: true,
-      mensagem: "Relatório solicitado com sucesso",
-    });
+      return res.json({
+        ok: true,
+        mensagem: "Relatório solicitado com sucesso",
+      });
+    } catch (e) {
+      console.error("Erro ao chamar gerarRelatorio:", e.message);
+      return res.status(500).json({
+        erro: "Erro ao gerar relatório",
+        detalhe: e.message,
+      });
+    }
   });
 });
 
