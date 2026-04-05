@@ -1601,57 +1601,56 @@ function drawCheckboxLine(doc, x, y, label, checked) {
 }
 
 function drawPhotoFrame(doc, x, y, w, h, title, foto) {
-  drawBox(doc, x, y, w, h);
+  doc.rect(x, y, w, h).stroke();
 
   doc.font("Helvetica-Bold")
     .fontSize(9)
     .text(title, x, y + 4, { width: w, align: "center" });
 
-  const imgX = x + 8;
-  const imgY = y + 20;
-  const imgW = w - 16;
-  const imgH = h - 30;
-
   if (!foto || !foto.caminho) {
     doc.font("Helvetica")
       .fontSize(9)
-      .text("Sem imagem", x, y + h / 2 - 5, { width: w, align: "center" });
+      .text("Sem imagem", x, y + h / 2 - 5, {
+        width: w,
+        align: "center",
+      });
     return;
   }
 
   const caminhoImagem = path.join(__dirname, "uploads", foto.caminho);
 
-  console.log("Tentando abrir imagem do PDF:", caminhoImagem);
+  console.log("Tentando carregar:", caminhoImagem);
 
   if (!fs.existsSync(caminhoImagem)) {
-    console.error("Imagem não encontrada no PDF:", caminhoImagem);
+    console.error("Imagem NÃO encontrada:", caminhoImagem);
+
     doc.font("Helvetica")
       .fontSize(8)
       .text(`Imagem não encontrada:\n${foto.caminho}`, x + 8, y + h / 2 - 12, {
         width: w - 16,
         align: "center",
       });
+
     return;
   }
 
   try {
-    doc.image(caminhoImagem, imgX, imgY, {
-      fit: [imgW, imgH],
+    doc.image(caminhoImagem, x + 8, y + 20, {
+      fit: [w - 16, h - 30],
       align: "center",
       valign: "center",
     });
   } catch (e) {
-    console.error("Erro ao renderizar imagem no PDF:", caminhoImagem, e.message);
+    console.error("Erro ao renderizar imagem:", e.message);
+
     doc.font("Helvetica")
       .fontSize(8)
-      .text(`Erro ao carregar imagem:\n${path.basename(caminhoImagem)}`, x + 8, y + h / 2 - 12, {
-        width: w - 16,
+      .text("Erro ao carregar imagem", x, y + h / 2 - 5, {
+        width: w,
         align: "center",
       });
   }
 }
-
-const caminhoImagem = path.join(__dirname, "uploads", foto.caminho);
 
 if (!fs.existsSync(caminhoImagem)) {
   console.error("Imagem não encontrada no PDF:", caminhoImagem);
