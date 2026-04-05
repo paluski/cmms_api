@@ -1993,7 +1993,7 @@ function gerarRelatorio(id) {
           drawWrappedField(
             doc,
             y,
-            `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\nATIVIDADE: ${tipoTrabalho}\nDescrição:`,
+            `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\n\n\n\n\nATIVIDADE: ${tipoTrabalho}\n\n\n\n\nDescrição:`,
             descricaoAtividade,
             180
           );
