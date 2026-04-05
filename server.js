@@ -1507,22 +1507,31 @@ function drawWrappedField(doc, y, title, content, minHeight = 70) {
   const innerX = x + 6;
   const innerW = w - 12;
 
+  const linhasTitulo = String(title || "").split("\n").filter(Boolean);
+  const alturaTitulo = Math.max(18, linhasTitulo.length * 12 + 8);
+
   const textHeight = doc.heightOfString(content || "-", {
     width: innerW,
     align: "justify",
   });
 
-  const h = Math.max(minHeight, 24 + textHeight + 8);
+  const h = Math.max(minHeight, alturaTitulo + textHeight + 18);
 
   drawBox(doc, x, y, w, h);
 
-  doc.font("Helvetica-Bold")
-    .fontSize(9)
-    .text(title, innerX, y + 5);
+  let yTitulo = y + 5;
+  linhasTitulo.forEach((linha) => {
+    doc.font("Helvetica-Bold")
+      .fontSize(9)
+      .text(linha, innerX, yTitulo, { width: innerW });
+    yTitulo += 12;
+  });
+
+  const yConteudo = y + alturaTitulo + 4;
 
   doc.font("Helvetica")
     .fontSize(9)
-    .text(content || "-", innerX, y + 20, {
+    .text(content || "-", innerX, yConteudo, {
       width: innerW,
       align: "justify",
     });
@@ -1610,7 +1619,9 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
     return;
   }
 
-  const caminhoImagem = path.resolve("uploads", foto.caminho);
+  const caminhoImagem = path.join(__dirname, "uploads", foto.caminho);
+
+  console.log("Tentando abrir imagem do PDF:", caminhoImagem);
 
   if (!fs.existsSync(caminhoImagem)) {
     console.error("Imagem não encontrada no PDF:", caminhoImagem);
@@ -1639,6 +1650,35 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
       });
   }
 }
+
+const caminhoImagem = path.join(__dirname, "uploads", foto.caminho);
+
+if (!fs.existsSync(caminhoImagem)) {
+  console.error("Imagem não encontrada no PDF:", caminhoImagem);
+  doc.font("Helvetica")
+    .fontSize(8)
+    .text(`Imagem não encontrada:\n${foto.caminho}`, x + 8, y + h / 2 - 12, {
+      width: w - 16,
+      align: "center",
+    });
+  return;
+}
+
+  try {
+    doc.image(caminhoImagem, imgX, imgY, {
+      fit: [imgW, imgH],
+      align: "center",
+      valign: "center",
+    });
+  } catch (e) {
+    console.error("Erro ao renderizar imagem no PDF:", caminhoImagem, e.message);
+    doc.font("Helvetica")
+      .fontSize(8)
+      .text(`Erro ao carregar imagem:\n${path.basename(caminhoImagem)}`, x + 8, y + h / 2 - 12, {
+        width: w - 16,
+        align: "center",
+      });
+  }
 
 function gerarRelatorio(id) {
   db.get(
@@ -1802,13 +1842,13 @@ function gerarRelatorio(id) {
 
           y += 50;
 
-          drawWrappedField(
-            doc,
-            y,
-            `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\nATIVIDADE: ${tipoTrabalho}\nDescrição:`,
-            descricaoAtividade,
-            180
-          );
+y = drawWrappedField(
+  doc,
+  y,
+  `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\nATIVIDADE: ${tipoTrabalho}\nDESCRIÇÃO:`,
+  descricaoAtividade,
+  220
+);
 
           doc.font("Helvetica").fontSize(8).text(`GERADO POR: ${respAtividade}`, 24, 802);
           doc.text("FORM-138 REV00", 250, 802);
