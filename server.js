@@ -1994,6 +1994,7 @@ function gerarRelatorio(id) {
             doc,
             y,
             `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\n\n\n\n\nATIVIDADE: ${tipoTrabalho}\n\n\n\n\nDescrição:${descricaoAtividade}`,
+            ,
             180
           );
 
