@@ -1873,7 +1873,7 @@ function gerarRelatorio(id) {
 
           doc.pipe(stream);
 
-          const ticket = `TICKET OS-${os.id}`;
+          const ticket = `O.S.- ${os.id}`;
           const projeto = txt(os.usina);
           const localProjeto = txt(os.usina_cidade || os.local);
           const localInterno = txt(os.local || "Usina");
