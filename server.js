@@ -699,7 +699,7 @@ db.serialize(() => {
   ensureColumn("ordens_servico", "parecer_verificacao", "TEXT");
   ensureColumn("ordens_servico", "parecer_aprovacao", "TEXT");
   ensureColumn("ordens_servico", "motivo_reprovacao", "TEXT");
-
+  ensureColumn("ordens_servico", "assinatura_tecnico", "TEXT");
   /* ========= DADOS INICIAIS ========= */
 
   db.run(`
@@ -1502,12 +1502,12 @@ app.put("/ordens/:id/start", auth, (req, res) => {
   });
 });
 
-app.put("/ordens/:id/concluir", auth, (req, res) => {
+app.put("/ordens/:id/concluir", auth, upload.single("assinatura"), (req, res) => {
   const usuarioId = req.user.id;
   const usuarioTipo = req.user.tipo;
   const id = req.params.id;
   const observacoes = normalizarTexto(req.body.observacoes);
-  const assinatura = null;
+  const assinatura = req.file ? req.file.filename : null;
 
   let sqlBusca = `
     SELECT id, tecnico_id, tipo_falha_id
