@@ -1502,12 +1502,12 @@ app.put("/ordens/:id/start", auth, (req, res) => {
   });
 });
 
-app.put("/ordens/:id/concluir", auth, upload.single("assinatura"), (req, res) => {
+app.put("/ordens/:id/concluir", auth, (req, res) => {
   const usuarioId = req.user.id;
   const usuarioTipo = req.user.tipo;
   const id = req.params.id;
   const observacoes = normalizarTexto(req.body.observacoes);
-  const assinatura = req.file ? req.file.filename : null;
+  const assinatura = null;
 
   let sqlBusca = `
     SELECT id, tecnico_id, tipo_falha_id
