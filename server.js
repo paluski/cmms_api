@@ -334,6 +334,197 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
   }
 }
 
+function normalizarGrupoFoto(grupo = {}, index = 0) {
+  const codigo = normalizarTexto(grupo.codigo || grupo.id)
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
+
+  return {
+    codigo,
+    titulo: normalizarTexto(grupo.titulo || codigo || `Grupo ${index + 1}`),
+    descricao: normalizarTexto(grupo.descricao),
+    minimo: Math.max(0, Number(grupo.minimo || 0)),
+    obrigatorio: normalizarBoolean(grupo.obrigatorio, false) ? 1 : 0,
+    ordem: Number(grupo.ordem || index + 1),
+    ativo: normalizarBoolean(grupo.ativo, true) ? 1 : 0,
+  };
+}
+
+function normalizarGruposFotosEntrada(entrada) {
+  const lista = Array.isArray(entrada) ? entrada : [];
+  return lista
+    .map((grupo, index) => normalizarGrupoFoto(grupo, index))
+    .filter((grupo) => grupo.codigo && grupo.titulo);
+}
+
+function carregarGruposFotosPorTipos(tipoFalhaIds, callback) {
+  const ids = [...new Set((tipoFalhaIds || []).filter(Boolean).map(Number))];
+
+  if (!ids.length) {
+    return callback(null, {});
+  }
+
+  const placeholders = ids.map(() => "?").join(",");
+
+  db.all(
+    `
+    SELECT *
+    FROM tipos_falha_fotos
+    WHERE tipo_falha_id IN (${placeholders})
+      AND ativo = 1
+    ORDER BY ordem ASC, id ASC
+    `,
+    ids,
+    (err, rows) => {
+      if (err) return callback(err);
+
+      const mapa = {};
+      ids.forEach((id) => {
+        mapa[id] = [];
+      });
+
+      (rows || []).forEach((row) => {
+        if (!mapa[row.tipo_falha_id]) {
+          mapa[row.tipo_falha_id] = [];
+        }
+        mapa[row.tipo_falha_id].push(row);
+      });
+
+      return callback(null, mapa);
+    }
+  );
+}
+
+function salvarGruposFotosTipoFalha(tipoFalhaId, gruposFotos, callback) {
+  const grupos = normalizarGruposFotosEntrada(gruposFotos);
+
+  db.run(
+    `DELETE FROM tipos_falha_fotos WHERE tipo_falha_id = ?`,
+    [tipoFalhaId],
+    (errDelete) => {
+      if (errDelete) return callback(errDelete);
+
+      if (!grupos.length) {
+        return callback(null);
+      }
+
+      let pendentes = grupos.length;
+      let finalizado = false;
+
+      grupos.forEach((grupo) => {
+        db.run(
+          `
+          INSERT INTO tipos_falha_fotos(
+            tipo_falha_id,
+            codigo,
+            titulo,
+            descricao,
+            minimo,
+            obrigatorio,
+            ordem,
+            ativo
+          )
+          VALUES(?,?,?,?,?,?,?,?)
+          `,
+          [
+            tipoFalhaId,
+            grupo.codigo,
+            grupo.titulo,
+            grupo.descricao,
+            grupo.minimo,
+            grupo.obrigatorio,
+            grupo.ordem,
+            grupo.ativo,
+          ],
+          (errInsert) => {
+            if (finalizado) return;
+
+            if (errInsert) {
+              finalizado = true;
+              return callback(errInsert);
+            }
+
+            pendentes -= 1;
+            if (pendentes === 0) {
+              finalizado = true;
+              return callback(null);
+            }
+          }
+        );
+      });
+    }
+  );
+}
+
+function validarFotosObrigatoriasOrdem(ordemId, tipoFalhaId, callback) {
+  if (!tipoFalhaId) {
+    return callback(null, { ok: true, faltando: [] });
+  }
+
+  db.all(
+    `
+    SELECT codigo, titulo, minimo, obrigatorio
+    FROM tipos_falha_fotos
+    WHERE tipo_falha_id = ?
+      AND ativo = 1
+    ORDER BY ordem ASC, id ASC
+    `,
+    [tipoFalhaId],
+    (errRegras, regras) => {
+      if (errRegras) return callback(errRegras);
+
+      const obrigatorias = (regras || []).filter(
+        (regra) => Number(regra.obrigatorio) === 1 && Number(regra.minimo) > 0
+      );
+
+      if (!obrigatorias.length) {
+        return callback(null, { ok: true, faltando: [] });
+      }
+
+      db.all(
+        `
+        SELECT tipo, COUNT(*) as total
+        FROM fotos
+        WHERE ordem_id = ?
+        GROUP BY tipo
+        `,
+        [ordemId],
+        (errFotos, fotos) => {
+          if (errFotos) return callback(errFotos);
+
+          const contagem = {};
+          (fotos || []).forEach((foto) => {
+            contagem[foto.tipo] = Number(foto.total || 0);
+          });
+
+          const faltando = obrigatorias
+            .map((regra) => {
+              const atual = contagem[regra.codigo] || 0;
+              const minimo = Number(regra.minimo || 0);
+
+              if (atual >= minimo) return null;
+
+              return {
+                codigo: regra.codigo,
+                titulo: regra.titulo,
+                minimo,
+                atual,
+                faltam: minimo - atual,
+              };
+            })
+            .filter(Boolean);
+
+          return callback(null, {
+            ok: faltando.length === 0,
+            faltando,
+          });
+        }
+      );
+    }
+  );
+}
+
 garantirPastaUploads();
 
 /* ==============================
@@ -400,6 +591,20 @@ db.serialize(() => {
       categoria TEXT,
       descricao TEXT,
       prioridade_padrao TEXT DEFAULT 'media',
+      ativo INTEGER NOT NULL DEFAULT 1
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS tipos_falha_fotos(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tipo_falha_id INTEGER NOT NULL,
+      codigo TEXT NOT NULL,
+      titulo TEXT NOT NULL,
+      descricao TEXT,
+      minimo INTEGER NOT NULL DEFAULT 0,
+      obrigatorio INTEGER NOT NULL DEFAULT 0,
+      ordem INTEGER NOT NULL DEFAULT 0,
       ativo INTEGER NOT NULL DEFAULT 1
     )
   `);
@@ -756,7 +961,23 @@ app.get("/tipos-falha", auth, (req, res) => {
         });
       }
 
-      return res.json(rows);
+      const ids = (rows || []).map((row) => row.id);
+
+      carregarGruposFotosPorTipos(ids, (errGrupos, gruposPorTipo) => {
+        if (errGrupos) {
+          return res.status(500).json({
+            erro: "Erro ao buscar grupos de fotos",
+            detalhe: errGrupos.message,
+          });
+        }
+
+        return res.json(
+          (rows || []).map((row) => ({
+            ...row,
+            grupos_fotos: gruposPorTipo[row.id] || [],
+          }))
+        );
+      });
     }
   );
 });
@@ -767,6 +988,7 @@ app.post("/tipos-falha", auth, (req, res) => {
   const descricao = normalizarTexto(req.body.descricao);
   const prioridade_padrao = normalizarTexto(req.body.prioridade_padrao || "media");
   const ativo = normalizarBoolean(req.body.ativo, true) ? 1 : 0;
+  const grupos_fotos = normalizarGruposFotosEntrada(req.body.grupos_fotos);
 
   if (!nome) {
     return res.status(400).json({ erro: "Nome do tipo de falha é obrigatório" });
@@ -786,7 +1008,18 @@ app.post("/tipos-falha", auth, (req, res) => {
         });
       }
 
-      return res.json({ id: this.lastID });
+      const tipoFalhaId = this.lastID;
+
+      salvarGruposFotosTipoFalha(tipoFalhaId, grupos_fotos, (errGrupos) => {
+        if (errGrupos) {
+          return res.status(500).json({
+            erro: "Erro ao salvar grupos de fotos",
+            detalhe: errGrupos.message,
+          });
+        }
+
+        return res.json({ id: tipoFalhaId });
+      });
     }
   );
 });
@@ -798,6 +1031,7 @@ app.put("/tipos-falha/:id", auth, (req, res) => {
   const descricao = normalizarTexto(req.body.descricao);
   const prioridade_padrao = normalizarTexto(req.body.prioridade_padrao || "media");
   const ativo = normalizarBoolean(req.body.ativo, true) ? 1 : 0;
+  const grupos_fotos = normalizarGruposFotosEntrada(req.body.grupos_fotos);
 
   if (!nome) {
     return res.status(400).json({ erro: "Nome do tipo de falha é obrigatório" });
@@ -822,7 +1056,16 @@ app.put("/tipos-falha/:id", auth, (req, res) => {
         });
       }
 
-      return res.json({ ok: true, alterados: this.changes });
+      salvarGruposFotosTipoFalha(id, grupos_fotos, (errGrupos) => {
+        if (errGrupos) {
+          return res.status(500).json({
+            erro: "Erro ao salvar grupos de fotos",
+            detalhe: errGrupos.message,
+          });
+        }
+
+        return res.json({ ok: true, alterados: this.changes });
+      });
     }
   );
 });
@@ -989,11 +1232,21 @@ app.get("/ordens/:id", auth, (req, res) => {
                   });
                 }
 
-                return res.json({
-                  ...row,
-                  fotos: fotos || [],
-                  historico: historico || [],
-                  comentarios: comentarios || [],
+                carregarGruposFotosPorTipos([row.tipo_falha_id], (errGrupos, gruposPorTipo) => {
+                  if (errGrupos) {
+                    return res.status(500).json({
+                      erro: "Erro ao buscar grupos de fotos da ordem",
+                      detalhe: errGrupos.message,
+                    });
+                  }
+
+                  return res.json({
+                    ...row,
+                    fotos: fotos || [],
+                    historico: historico || [],
+                    comentarios: comentarios || [],
+                    grupos_fotos: gruposPorTipo[row.tipo_falha_id] || [],
+                  });
                 });
               }
             );
@@ -1243,39 +1496,72 @@ app.put("/ordens/:id/concluir", auth, (req, res) => {
   const id = req.params.id;
   const observacoes = normalizarTexto(req.body.observacoes);
 
-  let sql = `
-    UPDATE ordens_servico
-    SET status='concluida',
-        data_fim=datetime('now','localtime'),
-        observacoes=?
-    WHERE id=?
+  let sqlBusca = `
+    SELECT id, tecnico_id, tipo_falha_id
+    FROM ordens_servico
+    WHERE id = ?
   `;
 
-  let params = [observacoes, id];
+  let paramsBusca = [id];
 
   if (usuarioTipo === "tecnico") {
-    sql += ` AND tecnico_id = ? `;
-    params.push(usuarioId);
+    sqlBusca += ` AND tecnico_id = ? `;
+    paramsBusca.push(usuarioId);
   }
 
-  db.run(sql, params, function (err) {
-    if (err) {
-      console.error("Erro ao concluir OS:", err.message);
+  db.get(sqlBusca, paramsBusca, (errBusca, ordem) => {
+    if (errBusca) {
       return res.status(500).json({
-        erro: "Erro ao concluir OS",
-        detalhe: err.message,
+        erro: "Erro ao buscar OS",
+        detalhe: errBusca.message,
       });
     }
 
-    if (this.changes === 0) {
+    if (!ordem) {
       return res.status(403).json({
         erro: "Você não tem permissão para concluir esta OS",
       });
     }
 
-    return res.json({
-      ok: true,
-      mensagem: "OS finalizada com sucesso",
+    validarFotosObrigatoriasOrdem(id, ordem.tipo_falha_id, (errValidacao, resultado) => {
+      if (errValidacao) {
+        return res.status(500).json({
+          erro: "Erro ao validar fotos obrigatórias",
+          detalhe: errValidacao.message,
+        });
+      }
+
+      if (!resultado.ok) {
+        return res.status(400).json({
+          erro: "Existem fotos obrigatórias pendentes",
+          faltando: resultado.faltando,
+        });
+      }
+
+      db.run(
+        `
+        UPDATE ordens_servico
+        SET status='concluida',
+            data_fim=datetime('now','localtime'),
+            observacoes=?
+        WHERE id=?
+        `,
+        [observacoes, id],
+        function (err) {
+          if (err) {
+            console.error("Erro ao concluir OS:", err.message);
+            return res.status(500).json({
+              erro: "Erro ao concluir OS",
+              detalhe: err.message,
+            });
+          }
+
+          return res.json({
+            ok: true,
+            mensagem: "OS finalizada com sucesso",
+          });
+        }
+      );
     });
   });
 });
@@ -1891,7 +2177,6 @@ function gerarRelatorio(id) {
 
           /* ========= PÁGINA 1 ========= */
 
-          // Cabeçalho
           drawBox(doc, 20, 20, 555, 50);
           drawBox(doc, 20, 20, 120, 50);
           drawBox(doc, 140, 20, 290, 50);
@@ -1948,7 +2233,6 @@ function gerarRelatorio(id) {
 
           y += 10;
 
-          // Criticidade / Tipo OS
           drawBox(doc, 20, y, 270, 84);
           doc.font("Helvetica-Bold").fontSize(9).text("CRITICIDADE DA ATIVIDADE", 24, y + 5);
           drawCheckboxLine(doc, 26, y + 24, "Leve", String(os.prioridade).toLowerCase() === "baixa");
@@ -1970,7 +2254,6 @@ function gerarRelatorio(id) {
 
           y += 94;
 
-          // Responsáveis
           drawLabelValue(doc, 20, y, 135, 40, "Responsável Realização", respRealizacao, {
             align: "center",
             valueSize: 8.5,
@@ -2148,15 +2431,24 @@ app.delete("/usinas/:id", auth, (req, res) => {
 app.delete("/tipos-falha/:id", auth, (req, res) => {
   const id = req.params.id;
 
-  db.run(`DELETE FROM tipos_falha WHERE id=?`, [id], function (err) {
-    if (err) {
+  db.run(`DELETE FROM tipos_falha_fotos WHERE tipo_falha_id=?`, [id], (errFotos) => {
+    if (errFotos) {
       return res.status(500).json({
-        erro: "Erro ao excluir tipo de falha",
-        detalhe: err.message,
+        erro: "Erro ao excluir grupos de fotos do tipo de falha",
+        detalhe: errFotos.message,
       });
     }
 
-    return res.json({ ok: true, removidos: this.changes });
+    db.run(`DELETE FROM tipos_falha WHERE id=?`, [id], function (err) {
+      if (err) {
+        return res.status(500).json({
+          erro: "Erro ao excluir tipo de falha",
+          detalhe: err.message,
+        });
+      }
+
+      return res.json({ ok: true, removidos: this.changes });
+    });
   });
 });
 
