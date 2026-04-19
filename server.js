@@ -527,6 +527,18 @@ function validarFotosObrigatoriasOrdem(ordemId, tipoFalhaId, callback) {
 
 garantirPastaUploads();
 
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads");
+  },
+
+  filename: (req, file, cb) => {
+    cb(null, gerarNomeArquivoSeguro(file.originalname));
+  },
+});
+
+const upload = multer({ storage });
+
 /* ==============================
    BANCO
 ============================== */
@@ -1706,17 +1718,7 @@ app.put("/ordens/:id/cancelar", auth, permitirTipos("admin"), (req, res) => {
    UPLOAD FOTO
 ============================== */
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads");
-  },
 
-  filename: (req, file, cb) => {
-    cb(null, gerarNomeArquivoSeguro(file.originalname));
-  },
-});
-
-const upload = multer({ storage });
 
 app.post("/upload/:ordem/:tipo", auth, upload.single("foto"), (req, res) => {
   const ordem = req.params.ordem;
