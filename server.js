@@ -1490,7 +1490,7 @@ app.put("/ordens/:id/start", auth, (req, res) => {
   });
 });
 
-app.put("/ordens/:id/concluir", auth, uploadAssinatura.single("assinatura"), (req, res) => {
+app.put("/ordens/:id/concluir", auth, upload.single("assinatura"), (req, res) => {
   const usuarioId = req.user.id;
   const usuarioTipo = req.user.tipo;
   const id = req.params.id;
