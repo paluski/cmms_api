@@ -1490,11 +1490,12 @@ app.put("/ordens/:id/start", auth, (req, res) => {
   });
 });
 
-app.put("/ordens/:id/concluir", auth, (req, res) => {
+app.put("/ordens/:id/concluir", auth, uploadAssinatura.single("assinatura"), (req, res) => {
   const usuarioId = req.user.id;
   const usuarioTipo = req.user.tipo;
   const id = req.params.id;
   const observacoes = normalizarTexto(req.body.observacoes);
+  const assinatura = req.file ? req.file.filename : null;
 
   let sqlBusca = `
     SELECT id, tecnico_id, tipo_falha_id
@@ -1543,13 +1544,13 @@ app.put("/ordens/:id/concluir", auth, (req, res) => {
         UPDATE ordens_servico
         SET status='concluida',
             data_fim=datetime('now','localtime'),
-            observacoes=?
+            observacoes=?,
+            assinatura_tecnico=COALESCE(?, assinatura_tecnico)
         WHERE id=?
         `,
-        [observacoes, id],
+        [observacoes, assinatura, id],
         function (err) {
           if (err) {
-            console.error("Erro ao concluir OS:", err.message);
             return res.status(500).json({
               erro: "Erro ao concluir OS",
               detalhe: err.message,
