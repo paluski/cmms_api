@@ -10,6 +10,10 @@ const PDFDocument = require("pdfkit");
 const app = express();
 const SECRET = "segredo_super";
 
+const DATA_DIR = "/var/data";
+const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
+const DB_PATH = path.join(DATA_DIR, "database.db");
+
 /* ==============================
    MIDDLEWARE
 ============================== */
@@ -40,7 +44,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static(UPLOADS_DIR));
 
 /* ==============================
    FUNÇÕES AUXILIARES
@@ -66,8 +70,12 @@ function normalizarBoolean(valor, padrao = false) {
 }
 
 function garantirPastaUploads() {
-  if (!fs.existsSync("uploads")) {
-    fs.mkdirSync("uploads");
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
 }
 
@@ -299,7 +307,7 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
     return;
   }
 
-  const caminhoImagem = path.join(__dirname, "uploads", foto.caminho);
+  const caminhoImagem = path.join(UPLOADS_DIR, foto.caminho);
 
   console.log("Tentando carregar:", caminhoImagem);
 
@@ -529,7 +537,7 @@ garantirPastaUploads();
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, "uploads");
+    cb(null, UPLOADS_DIR);
   },
 
   filename: (req, file, cb) => {
@@ -543,7 +551,7 @@ const upload = multer({ storage });
    BANCO
 ============================== */
 
-const db = new sqlite3.Database("database.db");
+const db = new sqlite3.Database(DB_PATH);
 
 function ensureColumn(table, column, definition) {
   db.all(`PRAGMA table_info(${table})`, (err, columns) => {
@@ -700,6 +708,7 @@ db.serialize(() => {
   ensureColumn("ordens_servico", "parecer_aprovacao", "TEXT");
   ensureColumn("ordens_servico", "motivo_reprovacao", "TEXT");
   ensureColumn("ordens_servico", "assinatura_tecnico", "TEXT");
+
   /* ========= DADOS INICIAIS ========= */
 
   db.run(`
@@ -1718,8 +1727,6 @@ app.put("/ordens/:id/cancelar", auth, permitirTipos("admin"), (req, res) => {
    UPLOAD FOTO
 ============================== */
 
-
-
 app.post("/upload/:ordem/:tipo", auth, upload.single("foto"), (req, res) => {
   const ordem = req.params.ordem;
   const tipo = normalizarTexto(req.params.tipo);
@@ -2087,7 +2094,7 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
     return;
   }
 
-  const caminhoImagem = path.resolve("uploads", foto.caminho);
+  const caminhoImagem = path.join(UPLOADS_DIR, foto.caminho);
 
   if (!fs.existsSync(caminhoImagem)) {
     console.error("Imagem não encontrada no PDF:", caminhoImagem);
@@ -2156,7 +2163,7 @@ function gerarRelatorio(id) {
             return;
           }
 
-          const arquivo = path.join("uploads", `relatorio_os_${id}.pdf`);
+          const arquivo = path.join(UPLOADS_DIR, `relatorio_os_${id}.pdf`);
           const stream = fs.createWriteStream(arquivo);
           const doc = new PDFDocument({ size: "A4", margin: 20 });
 
@@ -2279,8 +2286,8 @@ function gerarRelatorio(id) {
           drawWrappedField(
             doc,
             y,
-            `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\n\n\n\n\nATIVIDADE: ${tipoTrabalho}\n\n\n\n\nDescrição:${descricaoAtividade}`,0
-            ,
+            `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\n\n\n\n\nATIVIDADE: ${tipoTrabalho}\n\n\n\n\nDescrição:${descricaoAtividade}`,
+            0,
             180
           );
 
@@ -2535,7 +2542,7 @@ app.delete("/fotos/:id", auth, (req, res) => {
         return res.status(403).json({ erro: "Sem permissão" });
       }
 
-      const caminho = path.join("uploads", foto.caminho);
+      const caminho = path.join(UPLOADS_DIR, foto.caminho);
 
       db.run(`DELETE FROM fotos WHERE id=?`, [fotoId], function (errDelete) {
         if (errDelete) {
