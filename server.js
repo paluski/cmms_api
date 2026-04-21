@@ -757,7 +757,8 @@ db.serialize(() => {
   ensureColumn("ordens_servico", "parecer_aprovacao", "TEXT");
   ensureColumn("ordens_servico", "motivo_reprovacao", "TEXT");
   ensureColumn("ordens_servico", "assinatura_tecnico", "TEXT");
-
+  ensureColumn("ordens_servico", "assinatura_verificador", "TEXT");
+  ensureColumn("ordens_servico", "assinatura_aprovador", "TEXT");
   /* ========= DADOS INICIAIS ========= */
 
   db.run(`
@@ -1568,7 +1569,7 @@ app.put("/ordens/:id/concluir", auth, upload.single("assinatura"), (req, res) =>
   const assinatura = req.file ? req.file.filename : null;
 
   let sqlBusca = `
-    SELECT id, tecnico_id, tipo_falha_id
+    SELECT id, tecnico_id, tipo_falha_id, status
     FROM ordens_servico
     WHERE id = ?
   `;
@@ -1612,24 +1613,32 @@ app.put("/ordens/:id/concluir", auth, upload.single("assinatura"), (req, res) =>
       db.run(
         `
         UPDATE ordens_servico
-        SET status='concluida',
-            data_fim=datetime('now','localtime'),
+        SET status='para_verificacao',
             observacoes=?,
-            assinatura_tecnico=COALESCE(?, assinatura_tecnico)
+            assinatura_tecnico=COALESCE(?, assinatura_tecnico),
+            data_envio_verificacao=datetime('now','localtime')
         WHERE id=?
         `,
         [observacoes, assinatura, id],
         function (err) {
           if (err) {
             return res.status(500).json({
-              erro: "Erro ao concluir OS",
+              erro: "Erro ao enviar OS para verificação",
               detalhe: err.message,
             });
           }
 
+          registrarHistorico(
+            id,
+            ordem.status || "",
+            "para_verificacao",
+            req.user.id,
+            "OS finalizada pelo técnico e enviada para verificação"
+          );
+
           return res.json({
             ok: true,
-            mensagem: "OS finalizada com sucesso",
+            mensagem: "OS enviada para verificação com sucesso",
           });
         }
       );
@@ -1637,12 +1646,15 @@ app.put("/ordens/:id/concluir", auth, upload.single("assinatura"), (req, res) =>
   });
 });
 
-app.put("/ordens/:id/verificar", auth, permitirTipos("admin", "verificador"), (req, res) => {
+app.put("/ordens/:id/verificar", auth, permitirTipos("admin", "verificador"), upload.single("assinatura"), (req, res) => {
   const id = req.params.id;
   const parecer = normalizarTexto(req.body.parecer);
   const aprovado = normalizarBoolean(req.body.aprovado, false);
+  const assinatura = req.file ? req.file.filename : null;
   const statusDestino = aprovado ? "para_aprovacao" : "em_execucao";
-  const motivo = aprovado ? "OS verificada e enviada para aprovação" : "OS devolvida para correção";
+  const motivo = aprovado
+    ? "OS verificada e enviada para aprovação"
+    : "OS devolvida para correção";
 
   db.get(`SELECT status FROM ordens_servico WHERE id=?`, [id], (err, row) => {
     if (err) {
@@ -1664,10 +1676,11 @@ app.put("/ordens/:id/verificar", auth, permitirTipos("admin", "verificador"), (r
       SET status=?,
           verificador_id=?,
           data_verificacao=datetime('now','localtime'),
-          parecer_verificacao=?
+          parecer_verificacao=?,
+          assinatura_verificador=COALESCE(?, assinatura_verificador)
       WHERE id=?
       `,
-      [statusDestino, req.user.id, parecer, id],
+      [statusDestino, req.user.id, parecer, assinatura, id],
       function (errUpdate) {
         if (errUpdate) {
           return res.status(500).json({
@@ -1683,10 +1696,11 @@ app.put("/ordens/:id/verificar", auth, permitirTipos("admin", "verificador"), (r
   });
 });
 
-app.put("/ordens/:id/aprovar", auth, permitirTipos("admin", "aprovador"), (req, res) => {
+app.put("/ordens/:id/aprovar", auth, permitirTipos("admin", "aprovador"), upload.single("assinatura"), (req, res) => {
   const id = req.params.id;
   const parecer = normalizarTexto(req.body.parecer);
   const aprovado = normalizarBoolean(req.body.aprovado, false);
+  const assinatura = req.file ? req.file.filename : null;
   const statusDestino = aprovado ? "concluida" : "reprovada";
   const motivo = aprovado ? "OS aprovada e concluída" : "OS reprovada";
 
@@ -1711,10 +1725,11 @@ app.put("/ordens/:id/aprovar", auth, permitirTipos("admin", "aprovador"), (req, 
           aprovador_id=?,
           data_aprovacao=datetime('now','localtime'),
           parecer_aprovacao=?,
+          assinatura_aprovador=COALESCE(?, assinatura_aprovador),
           motivo_reprovacao=CASE WHEN ? = 'reprovada' THEN ? ELSE NULL END
       WHERE id=?
       `,
-      [statusDestino, req.user.id, parecer, statusDestino, parecer, id],
+      [statusDestino, req.user.id, parecer, assinatura, statusDestino, parecer, id],
       function (errUpdate) {
         if (errUpdate) {
           return res.status(500).json({
