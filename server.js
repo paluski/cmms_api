@@ -181,6 +181,55 @@ function drawLabelValue(doc, x, y, w, h, label, value, opts = {}) {
     .text(value, x + 4, y + 18, { width: w - 8, align });
 }
 
+function drawSignatureField(doc, x, y, w, h, label, nome, caminhoAssinatura) {
+  drawBox(doc, x, y, w, h);
+
+  doc.font("Helvetica-Bold")
+    .fontSize(8)
+    .text(label, x + 4, y + 4, {
+      width: w - 8,
+      align: "center",
+    });
+
+  const areaAssinaturaY = y + 18;
+  const areaAssinaturaH = h - 34;
+
+  if (caminhoAssinatura && fs.existsSync(caminhoAssinatura)) {
+    try {
+      doc.image(caminhoAssinatura, x + 8, areaAssinaturaY, {
+        fit: [w - 16, areaAssinaturaH],
+        align: "center",
+        valign: "center",
+      });
+    } catch (e) {
+      doc.font("Helvetica")
+        .fontSize(8)
+        .text("Erro ao carregar assinatura", x + 4, y + 26, {
+          width: w - 8,
+          align: "center",
+        });
+    }
+  } else {
+    doc.font("Helvetica")
+      .fontSize(8)
+      .text(nome || "-", x + 4, y + 30, {
+        width: w - 8,
+        align: "center",
+      });
+  }
+
+  doc.moveTo(x + 8, y + h - 16)
+    .lineTo(x + w - 8, y + h - 16)
+    .stroke();
+
+  doc.font("Helvetica")
+    .fontSize(7)
+    .text(nome || "-", x + 4, y + h - 13, {
+      width: w - 8,
+      align: "center",
+    });
+}
+
 function drawSectionTitle(doc, y, title) {
   doc.save();
   doc.rect(20, y, 555, 16).fillAndStroke("#f4b400", "#000000");
@@ -2180,12 +2229,14 @@ function gerarRelatorio(id) {
           const respRealizacao = txt(os.tecnico_nome);
           const respValidacao = txt(os.verificador_nome);
           const respAceite = txt(os.aprovador_nome);
+          const caminhoAssinaturaTecnico = os.assinatura_tecnico
+            ? path.join(UPLOADS_DIR, os.assinatura_tecnico)
+            : null;
           const dataAbertura = formatarDataBR(os.data_abertura);
           const dataInicio = formatarDataHoraBR(os.data_inicio);
           const dataFim = formatarDataHoraBR(os.data_fim);
           const dataFechamento = formatarDataBR(os.data_fim);
-
-          /* ========= PÁGINA 1 ========= */
+         /* ========= PÁGINA 1 ========= */
 
           drawBox(doc, 20, 20, 555, 50);
           drawBox(doc, 20, 20, 120, 50);
@@ -2264,24 +2315,30 @@ function gerarRelatorio(id) {
 
           y += 94;
 
-          drawLabelValue(doc, 20, y, 135, 40, "Responsável Realização", respRealizacao, {
-            align: "center",
-            valueSize: 8.5,
-          });
-          drawLabelValue(doc, 155, y, 135, 40, "Responsável Validação", respValidacao, {
-            align: "center",
-            valueSize: 8.5,
-          });
-          drawLabelValue(doc, 290, y, 135, 40, "Responsável Aceite", respAceite, {
-            align: "center",
-            valueSize: 8.5,
-          });
-          drawLabelValue(doc, 425, y, 150, 40, "Data de Fechamento da OS", dataFechamento, {
-            align: "center",
-            valueSize: 8.5,
-          });
+          drawSignatureField(
+            doc,
+            20,
+            y,
+            135,
+            60,
+            "Responsável Realização",
+            respRealizacao,
+            caminhoAssinaturaTecnico
+          );
 
-          y += 50;
+          drawLabelValue(doc, 155, y, 135, 60, "Responsável Validação", respValidacao, {
+            align: "center",
+            valueSize: 8.5,
+          });
+          drawLabelValue(doc, 290, y, 135, 60, "Responsável Aceite", respAceite, {
+            align: "center",
+            valueSize: 8.5,
+          });
+          drawLabelValue(doc, 425, y, 150, 60, "Data de Fechamento da OS", dataFechamento, {
+            align: "center",
+            valueSize: 8.5,
+          });
+          y += 70;
 
           drawWrappedField(
             doc,
