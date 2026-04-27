@@ -1787,6 +1787,60 @@ app.put("/ordens/:id/cancelar", auth, permitirTipos("admin"), (req, res) => {
   });
 });
 
+app.delete("/ordens/:id", auth, permitirTipos("admin"), (req, res) => {
+  const id = req.params.id;
+
+  db.run(`DELETE FROM fotos WHERE ordem_id=?`, [id], (errFotos) => {
+    if (errFotos) {
+      return res.status(500).json({
+        erro: "Erro ao excluir fotos da OS",
+        detalhe: errFotos.message,
+      });
+    }
+
+    db.run(`DELETE FROM comentarios_os WHERE ordem_id=?`, [id], (errComentarios) => {
+      if (errComentarios) {
+        return res.status(500).json({
+          erro: "Erro ao excluir comentários da OS",
+          detalhe: errComentarios.message,
+        });
+      }
+
+      db.run(`DELETE FROM historico_os WHERE ordem_id=?`, [id], (errHistorico) => {
+        if (errHistorico) {
+          return res.status(500).json({
+            erro: "Erro ao excluir histórico da OS",
+            detalhe: errHistorico.message,
+          });
+        }
+
+        db.run(`DELETE FROM relatorios WHERE ordem_id=?`, [id], (errRelatorios) => {
+          if (errRelatorios) {
+            return res.status(500).json({
+              erro: "Erro ao excluir relatórios da OS",
+              detalhe: errRelatorios.message,
+            });
+          }
+
+          db.run(`DELETE FROM ordens_servico WHERE id=?`, [id], function (errOrdem) {
+            if (errOrdem) {
+              return res.status(500).json({
+                erro: "Erro ao excluir OS",
+                detalhe: errOrdem.message,
+              });
+            }
+
+            return res.json({
+              ok: true,
+              removidos: this.changes,
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
 /* ==============================
    UPLOAD FOTO
 ============================== */
