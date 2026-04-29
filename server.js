@@ -1435,45 +1435,104 @@ app.put("/ordens/:id", auth, (req, res) => {
   const equipamento = normalizarTexto(req.body.equipamento);
   const observacoes = normalizarTexto(req.body.observacoes);
 
-  db.run(
-    `
-    UPDATE ordens_servico
-    SET usina_id=?,
-        tecnico_id=?,
-        tipo=?,
-        tipo_falha_id=?,
-        descricao=?,
-        prioridade=?,
-        solicitante=?,
-        local=?,
-        equipamento=?,
-        observacoes=?
-    WHERE id=?
-    `,
-    [
-      usina_id,
-      tecnico_id,
-      tipo,
-      tipo_falha_id,
-      descricao,
-      prioridade,
-      solicitante,
-      local,
-      equipamento,
-      observacoes,
-      id,
-    ],
-    function (err) {
-      if (err) {
-        return res.status(500).json({
-          erro: "Erro ao atualizar OS",
-          detalhe: err.message,
-        });
-      }
-
-      return res.json({ ok: true, alterados: this.changes });
+  db.get(`SELECT * FROM ordens_servico WHERE id=?`, [id], (errBusca, ordemAtual) => {
+    if (errBusca) {
+      return res.status(500).json({
+        erro: "Erro ao buscar OS para edição",
+        detalhe: errBusca.message,
+      });
     }
-  );
+
+    if (!ordemAtual) {
+      return res.status(404).json({ erro: "OS não encontrada" });
+    }
+
+    db.run(
+      `
+      UPDATE ordens_servico
+      SET usina_id=?,
+          tecnico_id=?,
+          tipo=?,
+          tipo_falha_id=?,
+          descricao=?,
+          prioridade=?,
+          solicitante=?,
+          local=?,
+          equipamento=?,
+          observacoes=?
+      WHERE id=?
+      `,
+      [
+        usina_id,
+        tecnico_id,
+        tipo,
+        tipo_falha_id,
+        descricao,
+        prioridade,
+        solicitante,
+        local,
+        equipamento,
+        observacoes,
+        id,
+      ],
+      function (err) {
+        if (err) {
+          return res.status(500).json({
+            erro: "Erro ao atualizar OS",
+            detalhe: err.message,
+          });
+        }
+
+        const alteracoes = [];
+
+        if ((ordemAtual.usina_id || null) !== usina_id) {
+          alteracoes.push("usina");
+        }
+        if ((ordemAtual.tecnico_id || null) !== tecnico_id) {
+          alteracoes.push("técnico");
+        }
+        if ((ordemAtual.tipo || "") !== tipo) {
+          alteracoes.push("tipo");
+        }
+        if ((ordemAtual.tipo_falha_id || null) !== tipo_falha_id) {
+          alteracoes.push("tipo de falha");
+        }
+        if ((ordemAtual.descricao || "") !== descricao) {
+          alteracoes.push("descrição");
+        }
+        if ((ordemAtual.prioridade || "") !== prioridade) {
+          alteracoes.push("prioridade");
+        }
+        if ((ordemAtual.solicitante || "") !== solicitante) {
+          alteracoes.push("solicitante");
+        }
+        if ((ordemAtual.local || "") !== local) {
+          alteracoes.push("local");
+        }
+        if ((ordemAtual.equipamento || "") !== equipamento) {
+          alteracoes.push("equipamento");
+        }
+        if ((ordemAtual.observacoes || "") !== observacoes) {
+          alteracoes.push("observações");
+        }
+
+        const observacaoHistorico =
+          alteracoes.length > 0
+            ? `OS editada. Campos alterados: ${alteracoes.join(", ")}`
+            : "OS editada sem alterações identificadas";
+
+        registrarHistorico(
+          id,
+          ordemAtual.status || "",
+          ordemAtual.status || "",
+          req.user.id,
+          observacaoHistorico
+        );
+
+        return res.json({ ok: true, alterados: this.changes });
+      }
+    );
+  });
 });
 
 /* ==============================
@@ -2831,7 +2890,7 @@ app.delete("/fotos/:id", auth, (req, res) => {
 
   db.get(
     `
-    SELECT fotos.*, ordens_servico.tecnico_id
+    SELECT fotos.*, ordens_servico.tecnico_id, ordens_servico.status
     FROM fotos
     JOIN ordens_servico ON ordens_servico.id = fotos.ordem_id
     WHERE fotos.id = ?
@@ -2860,6 +2919,14 @@ app.delete("/fotos/:id", auth, (req, res) => {
         if (fs.existsSync(caminho)) {
           fs.unlinkSync(caminho);
         }
+
+        registrarHistorico(
+          foto.ordem_id,
+          foto.status || "",
+          foto.status || "",
+          req.user.id,
+          `Foto removida do grupo '${foto.tipo}'. Arquivo: ${foto.caminho}`
+        );
 
         return res.json({ ok: true });
       });
