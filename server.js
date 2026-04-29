@@ -1905,31 +1905,77 @@ app.delete("/ordens/:id", auth, permitirTipos("admin"), (req, res) => {
 ============================== */
 
 app.post("/upload/:ordem/:tipo", auth, upload.single("foto"), (req, res) => {
-  const ordem = req.params.ordem;
+  const ordemId = req.params.ordem;
   const tipo = normalizarTexto(req.params.tipo);
 
   if (!req.file) {
     return res.status(400).json({ erro: "Arquivo não enviado" });
   }
 
-  db.run(
+  db.get(
     `
-    INSERT INTO fotos(ordem_id,tipo,caminho,data)
-    VALUES(?,?,?,datetime('now','localtime'))
+    SELECT id, status, tipo_falha_id
+    FROM ordens_servico
+    WHERE id = ?
     `,
-    [ordem, tipo, req.file.filename],
-    function (err) {
-      if (err) {
+    [ordemId],
+    (errOrdem, ordem) => {
+      if (errOrdem) {
         return res.status(500).json({
-          erro: "Erro ao salvar foto",
-          detalhe: err.message,
+          erro: "Erro ao buscar OS da foto",
+          detalhe: errOrdem.message,
         });
       }
 
-      return res.json({
-        arquivo: req.file.filename,
-        url: `/uploads/${req.file.filename}`,
-      });
+      if (!ordem) {
+        return res.status(404).json({
+          erro: "OS não encontrada",
+        });
+      }
+
+      db.run(
+        `
+        INSERT INTO fotos(ordem_id,tipo,caminho,data)
+        VALUES(?,?,?,datetime('now','localtime'))
+        `,
+        [ordemId, tipo, req.file.filename],
+        function (errInsert) {
+          if (errInsert) {
+            return res.status(500).json({
+              erro: "Erro ao salvar foto",
+              detalhe: errInsert.message,
+            });
+          }
+
+          db.get(
+            `
+            SELECT titulo
+            FROM tipos_falha_fotos
+            WHERE tipo_falha_id = ?
+              AND codigo = ?
+            LIMIT 1
+            `,
+            [ordem.tipo_falha_id, tipo],
+            (errGrupo, grupo) => {
+              const grupoTitulo =
+                grupo?.titulo || tipo || "grupo não identificado";
+
+              registrarHistorico(
+                ordemId,
+                ordem.status || "",
+                ordem.status || "",
+                req.user.id,
+                `Foto adicionada no grupo '${grupoTitulo}'. Arquivo: ${req.file.filename}`
+              );
+
+              return res.json({
+                arquivo: req.file.filename,
+                url: `/uploads/${req.file.filename}`,
+              });
+            }
+          );
+        }
+      );
     }
   );
 });
