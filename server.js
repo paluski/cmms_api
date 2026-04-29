@@ -2242,6 +2242,126 @@ function drawPhotoFrame(doc, x, y, w, h, title, foto) {
   }
 }
 
+function desenharCabecalhoRelatorio(doc, ticket, dataAbertura, projeto, localProjeto) {
+  drawBox(doc, 20, 20, 555, 50);
+  drawBox(doc, 20, 20, 120, 50);
+  drawBox(doc, 140, 20, 290, 50);
+  drawLabelValue(doc, 430, 20, 75, 25, "N°", ticket, {
+    align: "center",
+    valueSize: 8,
+  });
+  drawLabelValue(doc, 505, 20, 70, 25, "DATA", dataAbertura, {
+    align: "center",
+    valueSize: 8,
+  });
+
+  doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 20, 37, {
+    width: 120,
+    align: "center",
+  });
+  doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 140, 32, {
+    width: 290,
+    align: "center",
+  });
+  doc.font("Helvetica-Bold").fontSize(9).text(
+    "RELATÓRIO DE ATIVIDADES EXECUTADAS",
+    140,
+    49,
+    {
+      width: 290,
+      align: "center",
+    }
+  );
+
+  drawLabelValue(doc, 20, 75, 370, 32, "PROJETO", projeto, {
+    align: "center",
+    valueSize: 10,
+  });
+  drawLabelValue(doc, 390, 75, 185, 32, "LOCAL", localProjeto, {
+    align: "center",
+    valueSize: 10,
+  });
+}
+
+function desenharRodapeRelatorio(doc, id, paginaAtual, totalPaginas, geradoPor = "") {
+  if (geradoPor) {
+    doc.font("Helvetica").fontSize(8).text(`GERADO POR: ${geradoPor}`, 24, 802);
+  }
+
+  doc.font("Helvetica").fontSize(8).text("FORM-138 REV00", 250, 802);
+  doc.text(`OS_${id} ${paginaAtual} / ${totalPaginas}`, 490, 802);
+}
+
+function montarFotosPdf(fotos, gruposFotos) {
+  const gruposOrdenados = Array.isArray(gruposFotos) ? gruposFotos : [];
+  const listaFotos = Array.isArray(fotos) ? fotos : [];
+
+  const gruposMap = new Map();
+  gruposOrdenados.forEach((grupo, index) => {
+    const codigo = String(grupo?.codigo || "").trim();
+    if (!codigo) return;
+
+    gruposMap.set(codigo, {
+      codigo,
+      titulo: normalizarTexto(grupo?.titulo || `Grupo ${index + 1}`),
+      ordem: Number(grupo?.ordem || index + 1),
+      fotos: [],
+    });
+  });
+
+  const fotosNaoMapeadas = [];
+
+  listaFotos.forEach((foto, index) => {
+    const tipo = String(foto?.tipo || "").trim();
+
+    if (tipo && gruposMap.has(tipo)) {
+      gruposMap.get(tipo).fotos.push(foto);
+    } else {
+      fotosNaoMapeadas.push({
+        ...foto,
+        _titulo_pdf: normalizarTexto(foto?.tipo || `Foto ${index + 1}`),
+      });
+    }
+  });
+
+  const resultado = [];
+
+  Array.from(gruposMap.values())
+    .sort((a, b) => a.ordem - b.ordem)
+    .forEach((grupo) => {
+      grupo.fotos.forEach((foto, index) => {
+        resultado.push({
+          ...foto,
+          _titulo_pdf:
+            grupo.fotos.length > 1
+              ? `${grupo.titulo} ${index + 1}`
+              : grupo.titulo,
+        });
+      });
+    });
+
+  fotosNaoMapeadas.forEach((foto) => resultado.push(foto));
+
+  return resultado;
+}
+
+function desenharPaginaFotos(doc, fotosPagina) {
+  drawSectionTitle(doc, 112, "REGISTRO FOTOGRÁFICO");
+
+  const frames = [
+    { x: 20, y: 138, w: 268, h: 280 },
+    { x: 307, y: 138, w: 268, h: 280 },
+    { x: 20, y: 438, w: 268, h: 280 },
+    { x: 307, y: 438, w: 268, h: 280 },
+  ];
+
+  frames.forEach((frame, index) => {
+    const foto = fotosPagina[index] || null;
+    const titulo = foto?._titulo_pdf || `FOTO ${index + 1}`;
+    drawPhotoFrame(doc, frame.x, frame.y, frame.w, frame.h, titulo, foto);
+  });
+}
+
 function gerarRelatorio(id) {
   db.get(
     `
@@ -2270,7 +2390,8 @@ function gerarRelatorio(id) {
 
       db.all(
         `
-        SELECT * FROM fotos
+        SELECT *
+        FROM fotos
         WHERE ordem_id = ?
         ORDER BY id ASC
         `,
@@ -2281,198 +2402,259 @@ function gerarRelatorio(id) {
             return;
           }
 
-          const arquivo = path.join(UPLOADS_DIR, `relatorio_os_${id}.pdf`);
-          const stream = fs.createWriteStream(arquivo);
-          const doc = new PDFDocument({ size: "A4", margin: 20 });
+          db.all(
+            `
+            SELECT codigo, titulo, descricao, ordem
+            FROM tipos_falha_fotos
+            WHERE tipo_falha_id = ?
+              AND ativo = 1
+            ORDER BY ordem ASC, id ASC
+            `,
+            [os.tipo_falha_id],
+            (errGrupos, gruposFotos) => {
+              if (errGrupos) {
+                console.error("Erro ao buscar grupos de fotos para PDF:", errGrupos.message);
+                return;
+              }
 
-          doc.pipe(stream);
+              const arquivo = path.join(UPLOADS_DIR, `relatorio_os_${id}.pdf`);
+              const stream = fs.createWriteStream(arquivo);
+              const doc = new PDFDocument({ size: "A4", margin: 20 });
 
-          const ticket = `O.S.- ${os.id}`;
-          const projeto = txt(os.usina);
-          const localProjeto = txt(os.usina_cidade || os.local);
-          const localInterno = txt(os.local || "Usina");
-          const tipoTrabalho = txt(os.tipo_falha_nome || os.tipo);
-          const descricaoOcorrencia = txt(os.descricao);
-          const descricaoAtividade = txt(os.observacoes || os.descricao);
-          const respAtividade = txt(os.tecnico_nome);
-          const respRealizacao = txt(os.tecnico_nome);
-          const respValidacao = txt(os.verificador_nome);
-          const respAceite = txt(os.aprovador_nome);
-          const caminhoAssinaturaTecnico = os.assinatura_tecnico
-            ? path.join(UPLOADS_DIR, os.assinatura_tecnico)
-            : null;
-          const dataAbertura = formatarDataBR(os.data_abertura);
-          const dataInicio = formatarDataHoraBR(os.data_inicio);
-          const dataFim = formatarDataHoraBR(os.data_fim);
-          const dataFechamento = formatarDataBR(os.data_fim);
-         /* ========= PÁGINA 1 ========= */
+              doc.pipe(stream);
 
-          drawBox(doc, 20, 20, 555, 50);
-          drawBox(doc, 20, 20, 120, 50);
-          drawBox(doc, 140, 20, 290, 50);
-          drawLabelValue(doc, 430, 20, 75, 25, "N°", ticket, { align: "center", valueSize: 8 });
-          drawLabelValue(doc, 505, 20, 70, 25, "DATA", dataAbertura, { align: "center", valueSize: 8 });
+              const ticket = `O.S.- ${os.id}`;
+              const projeto = txt(os.usina);
+              const localProjeto = txt(os.usina_cidade || os.local);
+              const localInterno = txt(os.local || "Usina");
+              const tipoTrabalho = txt(os.tipo_falha_nome || os.tipo);
+              const descricaoOcorrencia = txt(os.descricao);
+              const descricaoAtividade = txt(os.observacoes || os.descricao);
+              const respAtividade = txt(os.tecnico_nome);
+              const respRealizacao = txt(os.tecnico_nome);
+              const respValidacao = txt(os.verificador_nome);
+              const respAceite = txt(os.aprovador_nome);
 
-          doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 20, 37, { width: 120, align: "center" });
-          doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 140, 32, {
-            width: 290,
-            align: "center",
-          });
-          doc.font("Helvetica-Bold").fontSize(9).text("RELATÓRIO DE ATIVIDADES EXECUTADAS", 140, 49, {
-            width: 290,
-            align: "center",
-          });
+              const caminhoAssinaturaTecnico = os.assinatura_tecnico
+                ? path.join(UPLOADS_DIR, os.assinatura_tecnico)
+                : null;
 
-          drawLabelValue(doc, 20, 75, 370, 32, "Projeto", projeto, { align: "center", valueSize: 10 });
-          drawLabelValue(doc, 390, 75, 185, 32, "LOCAL", localProjeto, { align: "center", valueSize: 10 });
+              const caminhoAssinaturaVerificador = os.assinatura_verificador
+                ? path.join(UPLOADS_DIR, os.assinatura_verificador)
+                : null;
 
-          drawLabelValue(doc, 20, 111, 180, 30, "LOCAL:", localInterno, { valueSize: 9 });
-          drawLabelValue(doc, 200, 111, 150, 30, "DATA INICIO", dataInicio, { align: "center", valueSize: 8.5 });
-          drawLabelValue(doc, 350, 111, 225, 30, "DATA FIM / TEMPO DA ATIVIDADE", dataFim, {
-            align: "center",
-            valueSize: 8.5,
-          });
+              const caminhoAssinaturaAprovador = os.assinatura_aprovador
+                ? path.join(UPLOADS_DIR, os.assinatura_aprovador)
+                : null;
 
-          let y = 146;
+              const dataAbertura = formatarDataBR(os.data_abertura);
+              const dataInicio = formatarDataHoraBR(os.data_inicio);
+              const dataFim = formatarDataHoraBR(os.data_fim);
+              const dataFechamento = formatarDataBR(os.data_fim);
 
-          drawSectionTitle(doc, y, "OCORRÊNCIA DA ATIVIDADE");
-          y += 22;
-          y = drawWrappedField(doc, y, "", descricaoOcorrencia, 90);
+              const fotosPdf = montarFotosPdf(fotos || [], gruposFotos || []);
+              const paginasFotos = Math.max(1, Math.ceil(fotosPdf.length / 4));
+              const totalPaginas = 1 + paginasFotos;
 
-          drawSectionTitle(doc, y, "LISTAGEM DE ATIVIDADES");
-          y += 22;
+              /* ========= PÁGINA 1 ========= */
 
-          y = drawSimpleTableHeader(doc, y);
-          y = drawSimpleTableRow(doc, y, {
-            ativ: "1",
-            qtd: "1,00",
-            descricao: tipoTrabalho,
-            responsavel: respAtividade,
-            referencia: "-",
-          });
+              drawBox(doc, 20, 20, 555, 50);
+              drawBox(doc, 20, 20, 120, 50);
+              drawBox(doc, 140, 20, 290, 50);
+              drawLabelValue(doc, 430, 20, 75, 25, "N°", ticket, {
+                align: "center",
+                valueSize: 8,
+              });
+              drawLabelValue(doc, 505, 20, 70, 25, "DATA", dataAbertura, {
+                align: "center",
+                valueSize: 8,
+              });
 
-          for (let i = 2; i <= 5; i++) {
-            y = drawSimpleTableRow(doc, y, {
-              ativ: String(i),
-              qtd: "",
-              descricao: "",
-              responsavel: "",
-              referencia: "",
-            });
-          }
-
-          y += 10;
-
-          drawBox(doc, 20, y, 270, 84);
-          doc.font("Helvetica-Bold").fontSize(9).text("CRITICIDADE DA ATIVIDADE", 24, y + 5);
-          drawCheckboxLine(doc, 26, y + 24, "Leve", String(os.prioridade).toLowerCase() === "baixa");
-          drawCheckboxLine(doc, 26, y + 44, "Moderada", String(os.prioridade).toLowerCase() === "media");
-          drawCheckboxLine(
-            doc,
-            26,
-            y + 64,
-            "Grave",
-            ["alta", "critica"].includes(String(os.prioridade).toLowerCase())
-          );
-
-          drawBox(doc, 305, y, 270, 84);
-          doc.font("Helvetica-Bold").fontSize(9).text("TIPO DE ORDEM DE SERVIÇO", 309, y + 5);
-          drawCheckboxLine(doc, 311, y + 24, "PONTUAL", true);
-          drawCheckboxLine(doc, 411, y + 24, "RECORRENTE", false);
-          drawCheckboxLine(doc, 311, y + 44, "PROGRAMADA", false);
-          drawCheckboxLine(doc, 411, y + 44, "NÃO PROGRAMADA", true);
-
-          y += 94;
-
-          drawSignatureField(
-            doc,
-            20,
-            y,
-            135,
-            60,
-            "Responsável Realização",
-            respRealizacao,
-            caminhoAssinaturaTecnico
-          );
-
-          drawLabelValue(doc, 155, y, 135, 60, "Responsável Validação", respValidacao, {
-            align: "center",
-            valueSize: 8.5,
-          });
-          drawLabelValue(doc, 290, y, 135, 60, "Responsável Aceite", respAceite, {
-            align: "center",
-            valueSize: 8.5,
-          });
-          drawLabelValue(doc, 425, y, 150, 60, "Data de Fechamento da OS", dataFechamento, {
-            align: "center",
-            valueSize: 8.5,
-          });
-          y += 70;
-
-          drawWrappedField(
-            doc,
-            y,
-            `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\n\n\n\n\nATIVIDADE: ${tipoTrabalho}\n\n\n\n\nDescrição:${descricaoAtividade}`,
-            0,
-            180
-          );
-
-          doc.font("Helvetica").fontSize(8).text(`GERADO POR: ${respAtividade}`, 24, 802);
-          doc.text("FORM-138 REV00", 250, 802);
-          doc.text(`OS_${id} 1 / 2`, 490, 802);
-
-          /* ========= PÁGINA 2 ========= */
-
-          doc.addPage({ size: "A4", margin: 20 });
-
-          drawBox(doc, 20, 20, 555, 50);
-          drawBox(doc, 20, 20, 120, 50);
-          drawBox(doc, 140, 20, 290, 50);
-          drawLabelValue(doc, 430, 20, 75, 25, "N°", ticket, { align: "center", valueSize: 8 });
-          drawLabelValue(doc, 505, 20, 70, 25, "DATA", dataAbertura, { align: "center", valueSize: 8 });
-
-          doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 20, 37, { width: 120, align: "center" });
-          doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 140, 32, {
-            width: 290,
-            align: "center",
-          });
-          doc.font("Helvetica-Bold").fontSize(9).text("RELATÓRIO DE ATIVIDADES EXECUTADAS", 140, 49, {
-            width: 290,
-            align: "center",
-          });
-
-          drawLabelValue(doc, 20, 75, 370, 32, "PROJETO", projeto, { align: "center", valueSize: 10 });
-          drawLabelValue(doc, 390, 75, 185, 32, "LOCAL", localProjeto, { align: "center", valueSize: 10 });
-
-          drawSectionTitle(doc, 112, "REGISTRO FOTOGRÁFICO");
-
-          const frames = [
-            { x: 20, y: 138, w: 268, h: 280, title: "FOTO 1", foto: fotos[0] },
-            { x: 307, y: 138, w: 268, h: 280, title: "FOTO 2", foto: fotos[1] },
-            { x: 20, y: 438, w: 268, h: 280, title: "FOTO 3", foto: fotos[2] },
-            { x: 307, y: 438, w: 268, h: 280, title: "FOTO 4", foto: fotos[3] },
-          ];
-
-          frames.forEach((f) => {
-            drawPhotoFrame(doc, f.x, f.y, f.w, f.h, f.title, f.foto);
-          });
-
-          doc.font("Helvetica").fontSize(8).text("FORM-138 REV00", 24, 802);
-          doc.text(`OS_${id} 2 / 2`, 490, 802);
-
-          doc.end();
-
-          stream.on("finish", () => {
-            db.run(`DELETE FROM relatorios WHERE ordem_id=?`, [id], () => {
-              db.run(
-                `
-                INSERT INTO relatorios(ordem_id,arquivo,data)
-                VALUES(?,?,datetime('now','localtime'))
-                `,
-                [id, arquivo]
+              doc.font("Helvetica-Bold").fontSize(16).text("ILUMISOL", 20, 37, {
+                width: 120,
+                align: "center",
+              });
+              doc.font("Helvetica-Bold").fontSize(13).text("ORDEM DE SERVIÇO", 140, 32, {
+                width: 290,
+                align: "center",
+              });
+              doc.font("Helvetica-Bold").fontSize(9).text(
+                "RELATÓRIO DE ATIVIDADES EXECUTADAS",
+                140,
+                49,
+                {
+                  width: 290,
+                  align: "center",
+                }
               );
-            });
-          });
+
+              drawLabelValue(doc, 20, 75, 370, 32, "Projeto", projeto, {
+                align: "center",
+                valueSize: 10,
+              });
+              drawLabelValue(doc, 390, 75, 185, 32, "LOCAL", localProjeto, {
+                align: "center",
+                valueSize: 10,
+              });
+
+              drawLabelValue(doc, 20, 111, 180, 30, "LOCAL:", localInterno, {
+                valueSize: 9,
+              });
+              drawLabelValue(doc, 200, 111, 150, 30, "DATA INICIO", dataInicio, {
+                align: "center",
+                valueSize: 8.5,
+              });
+              drawLabelValue(
+                doc,
+                350,
+                111,
+                225,
+                30,
+                "DATA FIM / TEMPO DA ATIVIDADE",
+                dataFim,
+                {
+                  align: "center",
+                  valueSize: 8.5,
+                }
+              );
+
+              let y = 146;
+
+              drawSectionTitle(doc, y, "OCORRÊNCIA DA ATIVIDADE");
+              y += 22;
+              y = drawWrappedField(doc, y, "", descricaoOcorrencia, 90);
+
+              drawSectionTitle(doc, y, "LISTAGEM DE ATIVIDADES");
+              y += 22;
+
+              y = drawSimpleTableHeader(doc, y);
+              y = drawSimpleTableRow(doc, y, {
+                ativ: "1",
+                qtd: "1,00",
+                descricao: tipoTrabalho,
+                responsavel: respAtividade,
+                referencia: "-",
+              });
+
+              for (let i = 2; i <= 5; i++) {
+                y = drawSimpleTableRow(doc, y, {
+                  ativ: String(i),
+                  qtd: "",
+                  descricao: "",
+                  responsavel: "",
+                  referencia: "",
+                });
+              }
+
+              y += 10;
+
+              drawBox(doc, 20, y, 270, 84);
+              doc.font("Helvetica-Bold").fontSize(9).text("CRITICIDADE DA ATIVIDADE", 24, y + 5);
+              drawCheckboxLine(doc, 26, y + 24, "Leve", String(os.prioridade).toLowerCase() === "baixa");
+              drawCheckboxLine(doc, 26, y + 44, "Moderada", String(os.prioridade).toLowerCase() === "media");
+              drawCheckboxLine(
+                doc,
+                26,
+                y + 64,
+                "Grave",
+                ["alta", "critica"].includes(String(os.prioridade).toLowerCase())
+              );
+
+              drawBox(doc, 305, y, 270, 84);
+              doc.font("Helvetica-Bold").fontSize(9).text("TIPO DE ORDEM DE SERVIÇO", 309, y + 5);
+              drawCheckboxLine(doc, 311, y + 24, "PONTUAL", true);
+              drawCheckboxLine(doc, 411, y + 24, "RECORRENTE", false);
+              drawCheckboxLine(doc, 311, y + 44, "PROGRAMADA", false);
+              drawCheckboxLine(doc, 411, y + 44, "NÃO PROGRAMADA", true);
+
+              y += 94;
+
+              drawSignatureField(
+                doc,
+                20,
+                y,
+                135,
+                60,
+                "Responsável Realização",
+                respRealizacao,
+                caminhoAssinaturaTecnico
+              );
+
+              drawSignatureField(
+                doc,
+                155,
+                y,
+                135,
+                60,
+                "Responsável Validação",
+                respValidacao,
+                caminhoAssinaturaVerificador
+              );
+
+              drawSignatureField(
+                doc,
+                290,
+                y,
+                135,
+                60,
+                "Responsável Aceite",
+                respAceite,
+                caminhoAssinaturaAprovador
+              );
+
+              drawLabelValue(doc, 425, y, 150, 60, "Data de Fechamento da OS", dataFechamento, {
+                align: "center",
+                valueSize: 8.5,
+              });
+
+              y += 70;
+
+              drawWrappedField(
+                doc,
+                y,
+                `RESPONSÁVEL DA ATIVIDADE: ${respAtividade}\n\n\n\n\nATIVIDADE: ${tipoTrabalho}\n\n\n\n\nDescrição:${descricaoAtividade}`,
+                0,
+                180
+              );
+
+              desenharRodapeRelatorio(doc, id, 1, totalPaginas, respAtividade);
+
+              /* ========= PÁGINAS DE FOTOS ========= */
+
+              for (let pagina = 0; pagina < paginasFotos; pagina++) {
+                doc.addPage({ size: "A4", margin: 20 });
+
+                desenharCabecalhoRelatorio(
+                  doc,
+                  ticket,
+                  dataAbertura,
+                  projeto,
+                  localProjeto
+                );
+
+                const inicio = pagina * 4;
+                const fim = inicio + 4;
+                const fotosPagina = fotosPdf.slice(inicio, fim);
+
+                desenharPaginaFotos(doc, fotosPagina);
+                desenharRodapeRelatorio(doc, id, pagina + 2, totalPaginas);
+              }
+
+              doc.end();
+
+              stream.on("finish", () => {
+                db.run(`DELETE FROM relatorios WHERE ordem_id=?`, [id], () => {
+                  db.run(
+                    `
+                    INSERT INTO relatorios(ordem_id,arquivo,data)
+                    VALUES(?,?,datetime('now','localtime'))
+                    `,
+                    [id, arquivo]
+                  );
+                });
+              });
+            }
+          );
         }
       );
     }
